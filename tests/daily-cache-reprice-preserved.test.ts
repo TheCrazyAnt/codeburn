@@ -340,4 +340,52 @@ describe('repricePreservedDays', () => {
     const loaded = await loadDailyCache()
     expect(loaded.preservedRepriced).toBe(DAILY_CACHE_VERSION)
   })
+
+  it('a fresh parse that covers a non-carried day leaves that day\'s per-model values untouched by the reprice pass', async () => {
+    setPriceOverrides({ 'gpt-5.4': { input: 2, output: 8 } })
+    const yesterday = daysAgo(1)
+    const baseline: DailyCache = {
+      version: DAILY_CACHE_VERSION,
+      savingsConfigHash: 'cfg-A',
+      tzKey: currentTzKey(),
+      lastComputedDate: yesterday,
+      days: [],
+      complete: false,
+    }
+    await saveDailyCache(baseline)
+    const freshSlice = sliceWithModels(2.8, 5, {
+      'gpt-5.4': modelStats(2.8, 5, { input: 1_000_000, output: 100_000 }),
+    })
+    const freshDay = day(daysAgo(40), { codex: freshSlice })
+    const out = await ensureCacheHydrated(noSessions, () => [freshDay], 'cfg-A')
+    expect(out.preservedRepriced).toBe(DAILY_CACHE_VERSION)
+    const settled = out.days.find(d => d.date === freshDay.date)!
+    expect(settled.carried).toBeUndefined()
+    expect(settled.providers['codex']!.cost).toBeCloseTo(2.8, 6)
+    expect(settled.providers['codex']!.models!['gpt-5.4']!.cost).toBeCloseTo(2.8, 6)
+    expect(settled.providers['codex']!.models!['gpt-5.4']!.inputTokens).toBe(1_000_000)
+    expect(settled.providers['codex']!.models!['gpt-5.4']!.outputTokens).toBe(100_000)
+  })
+
+  it('a partial re-derive (parseWasComplete false) does not stamp preservedRepriced', async () => {
+    setPriceOverrides({ 'claude-opus-4-6': { input: 15, output: 75 } })
+    const yesterday = daysAgo(1)
+    const settled = daysAgo(40)
+    const baseline: DailyCache = {
+      version: DAILY_CACHE_VERSION,
+      savingsConfigHash: 'cfg-A',
+      tzKey: currentTzKey(),
+      lastComputedDate: yesterday,
+      days: [day(settled, {
+        claude: sliceWithModels(15.29, 283, {
+          'claude-opus-4-6': modelStats(15.29, 283, { input: 1_000_000, output: 100_000 }),
+        }),
+      }, { carried: true })],
+      complete: false,
+    }
+    await saveDailyCache(baseline)
+    const out = await ensureCacheHydrated(noSessions, () => [], 'cfg-A', () => false)
+    expect(out.preservedRepriced).toBeUndefined()
+    expect(out.complete).toBe(false)
+  })
 })
