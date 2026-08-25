@@ -204,6 +204,24 @@ export type SessionSourceMetadata = {
   kind: 'claude-config' | 'claude-desktop'
 }
 
+/// Provider-recorded parent/child linkage between sessions. Populated only when
+/// the provider itself names the relationship on disk (Claude subagent
+/// transcripts carry their parent's `sessionId` and the parent carries the
+/// spawn results; Kimi Code's `state.json` records each agent's
+/// `parentAgentId`). Time-adjacency and other inference are explicitly out of
+/// scope per the spec rule, so a session without a direct provider statement
+/// of role carries NO `lineage` field at all (absent, not 'unknown').
+///
+/// `parentSessionId` is set only when the parent is a distinct session
+/// (Claude). For providers whose subagent shares the parent's session (Kimi
+/// Code) the role alone conveys the relationship; the parent's agent name
+/// lives in the provider's own state file, not in this field.
+export type Lineage = {
+  parentSessionId?: string
+  role: 'root' | 'child'
+  evidence: 'provider-recorded'
+}
+
 export type SessionSummary = {
   sessionId: string
   project: string
@@ -300,6 +318,10 @@ export type SessionSummary = {
   // Built-in tools (Bash, Edit, etc.) are filtered out. Provider-agnostic field;
   // currently populated only by the Claude parser.
   mcpInventory?: string[]
+  /// Provider-recorded parent/child relationship. Absent (not 'unknown') for
+  /// any session the provider does not name a role for. Additive metadata
+  /// only: never affects folding, totals, or any report aggregation.
+  lineage?: Lineage
 }
 
 export type ProjectSummary = {

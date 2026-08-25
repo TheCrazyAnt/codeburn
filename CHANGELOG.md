@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- **Provider-recorded session lineage on `SessionSummary` (CB-1 first slice).** Sessions whose provider names a parent/child relationship now carry a `lineage: { parentSessionId?, role: 'root' | 'child', evidence: 'provider-recorded' }` field. For Claude Code a child is a subagent transcript that names its parent in its own `sessionId`; a parent is a session whose own transcript records an `Agent`/`Task` spawn result with `agentId` (or an ambiguous pairing). For Kimi Code the role is resolved from `state.json.agents[<agentName>].parentAgentId`: a `null` parent marks the root, a sibling agent name marks a child. The evidence is always `provider-recorded` - no inference, no time-adjacency. A session the provider does not name a role for carries NO `lineage` field (absent, not `'unknown'`). Pure additive metadata: every cost/token/call total in every report is byte-identical to a build that treats the field as absent. Kimi Code's parse version takes a `-lineage-v1` suffix so already-cached Kimi files re-parse once and gain the per-file field; Claude needs no parse-version bump because its role is derivable from fields the cache already carries (`isSidechain`, `parentSessionId`, `agentSpawnLinks`).
+
 ### Fixed (macOS)
 
 - **CodeBurnMenubar now launches mise-installed CodeBurn correctly from Spotlight.** Spotlight gives GUI apps a minimal PATH, so a persisted `mise use -g npm:codeburn` launcher could be found but then fail with exit 127 when its shell wrapper tried to resolve `node`. The menubar child environment now includes mise's stable shim directory (including a custom `MISE_DATA_DIR` when available), matching the existing Volta/asdf/nvm handling without invoking a shell. (#1124)

@@ -13,6 +13,10 @@ type SessionState = {
   createdAt?: string
   updatedAt?: string
   workDir?: string
+  /// `state.json.agents[<agentName>].parentAgentId` per agent, when present.
+  /// `null` for the parent (root) agent; a sibling agent name for a child.
+  /// Read for the lineage capture (spec: provider-recorded role only).
+  agents?: Record<string, { parentAgentId?: string | null }>
 }
 
 type RequestContext = {
@@ -106,10 +110,24 @@ async function readState(sessionDir: string): Promise<SessionState> {
   try {
     const state = asObject(JSON.parse(await readFile(join(sessionDir, 'state.json'), 'utf8')))
     if (!state) return {}
+    const rawAgents = state['agents']
+    let agents: Record<string, { parentAgentId?: string | null }> | undefined
+    if (rawAgents && typeof rawAgents === 'object' && !Array.isArray(rawAgents)) {
+      agents = {}
+      for (const [name, value] of Object.entries(rawAgents as Record<string, unknown>)) {
+        const rec = asObject(value)
+        if (!rec) continue
+        const parentRaw = rec['parentAgentId']
+        if (parentRaw === null) agents[name] = { parentAgentId: null }
+        else if (typeof parentRaw === 'string') agents[name] = { parentAgentId: parentRaw }
+      }
+      if (Object.keys(agents).length === 0) agents = undefined
+    }
     return {
       createdAt: stringValue(state['createdAt']) || undefined,
       updatedAt: stringValue(state['updatedAt']) || undefined,
       workDir: stringValue(state['workDir']) || undefined,
+      ...(agents ? { agents } : {}),
     }
   } catch {
     return {}

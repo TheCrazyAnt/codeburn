@@ -51,6 +51,7 @@ import type {
   ContentBlock,
   DateRange,
   JournalEntry,
+  Lineage,
   ParsedApiCall,
   ParsedTurn,
   ProjectSummary,
@@ -2406,6 +2407,25 @@ async function scanProjectDirs(
     }
     if (cachedFile.ambiguousSpawnAgentIds?.length) session.ambiguousSpawnAgentIds = cachedFile.ambiguousSpawnAgentIds
     if (Object.keys(spawnPrSets).length > 0) session.spawnPrSets = spawnPrSets
+    // Lineage: provider-recorded parent/child role. A sidechain file is a
+    // child if its own transcript names the parent (`parentSessionId`); a
+    // non-sidechain file is a root if it carries provider-recorded child
+    // evidence (agentSpawnLinks / ambiguousSpawnAgentIds). Anything else
+    // gets NO field - absent, not 'unknown', per the spec rule. Pure
+    // additive metadata: never affects folding or totals.
+    if (cachedFile.isSidechain && cachedFile.parentSessionId) {
+      session.lineage = {
+        parentSessionId: cachedFile.parentSessionId,
+        role: 'child',
+        evidence: 'provider-recorded',
+      }
+    } else if (
+      !cachedFile.isSidechain
+      && (Object.keys(cachedFile.agentSpawnLinks ?? {}).length > 0
+        || (cachedFile.ambiguousSpawnAgentIds?.length ?? 0) > 0)
+    ) {
+      session.lineage = { role: 'root', evidence: 'provider-recorded' }
+    }
 
     if (session.apiCalls > 0 || anchorOnly) {
       const projectKey = cachedFile.canonicalCwd
@@ -2578,6 +2598,39 @@ async function canonicalizeProviderCallProject(call: ParsedProviderCall): Promis
     project: projectNameFromPath(canonical.path, call.project ?? canonical.path),
     projectPath: canonical.path,
   }
+}
+
+/// Per-file lineage for providers that record parent/child evidence in
+/// sibling state. Currently Kimi Code: `state.json.agents[<agentName>]
+/// .parentAgentId` (provider-recorded role only, no inference). A `null`
+/// parent marks the root agent; a sibling agent name marks a child. Other
+/// providers return undefined and never set a per-file field, so the cache
+/// round-trips no lineage for them and SessionSummary stays absent.
+async function providerLineageForSource(providerName: string, source: SessionSource): Promise<Lineage | undefined> {
+  if (providerName !== 'kimicode') return undefined
+  const agentName = source.sourceId
+  if (!agentName) return undefined
+  // The wire file is at <home>/sessions/wd_*/<sessionDir>/agents/<agentName>/wire.jsonl.
+  // The session dir (where state.json lives) is three levels up from the wire path.
+  const sessionDir = dirname(dirname(dirname(source.path)))
+  let stateRaw: string
+  try {
+    stateRaw = await readFile(join(sessionDir, 'state.json'), 'utf8')
+  } catch {
+    return undefined
+  }
+  let parsed: unknown
+  try { parsed = JSON.parse(stateRaw) } catch { return undefined }
+  const stateObj = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null
+  if (!stateObj) return undefined
+  const rawAgents = stateObj['agents']
+  if (!rawAgents || typeof rawAgents !== 'object' || Array.isArray(rawAgents)) return undefined
+  const agentEntry = (rawAgents as Record<string, unknown>)[agentName]
+  if (!agentEntry || typeof agentEntry !== 'object') return undefined
+  const parentRaw = (agentEntry as Record<string, unknown>)['parentAgentId']
+  if (parentRaw === null) return { role: 'root', evidence: 'provider-recorded' }
+  if (typeof parentRaw === 'string' && parentRaw) return { role: 'child', evidence: 'provider-recorded' }
+  return undefined
 }
 
 function apiCallToCachedCall(call: ParsedApiCall): CachedCall {
@@ -3480,6 +3533,13 @@ export async function parseProviderSources(
         const canonicalCalls = await Promise.all(providerCalls.map(canonicalizeProviderCallProject))
         const turns = providerCallsToCachedTurns(canonicalCalls)
         const prLinks = [...new Set(canonicalCalls.flatMap(call => call.prLinks ?? []))]
+        // Per-file lineage for providers that record parent/child evidence in
+        // sibling state. Currently Kimi Code: `state.json.agents[<agentName>]
+        // .parentAgentId` (provider-recorded role only, no inference). Reads
+        // the same state.json the parser already opens for `projectPath`, so
+        // the cost is one small JSON read per parsed Kimi file. Other
+        // providers return undefined and never set a per-file field.
+        const lineage = await providerLineageForSource(providerName, source)
 
         // Store/merge parsed turns into the cache.
         // Durable providers use a union-by-deduplicationKey merge: existing turns
@@ -3522,7 +3582,7 @@ export async function parseProviderSources(
             existingEntry.fingerprint = fp
             if (prLinks.length) existingEntry.prLinks = [...new Set([...(existingEntry.prLinks ?? []), ...prLinks])]
           } else {
-            section.files[source.path] = { fingerprint: fp, mcpInventory: [], turns, ...(prLinks.length ? { prLinks } : {}) }
+            section.files[source.path] = { fingerprint: fp, mcpInventory: [], turns, ...(prLinks.length ? { prLinks } : {}), ...(lineage ? { lineage } : {}) }
           }
         } else {
           // Non-durable: overwrite (clearedPaths already deleted stale entry above)
@@ -3533,8 +3593,9 @@ export async function parseProviderSources(
           if (existingCacheEntry) {
             existingCacheEntry.turns = [...existingCacheEntry.turns, ...turns]
             if (prLinks.length) existingCacheEntry.prLinks = [...new Set([...(existingCacheEntry.prLinks ?? []), ...prLinks])]
+            if (lineage) existingCacheEntry.lineage = lineage
           } else {
-            section.files[source.path] = { fingerprint: fp, mcpInventory: [], turns, ...(prLinks.length ? { prLinks } : {}) }
+            section.files[source.path] = { fingerprint: fp, mcpInventory: [], turns, ...(prLinks.length ? { prLinks } : {}), ...(lineage ? { lineage } : {}) }
           }
         }
         didParse = true
@@ -3892,7 +3953,7 @@ export async function parseProviderSources(
 
   // Query-time: derive SessionSummary from all cached turns.
   // Uses seenKeys (shared across providers) for cross-provider dedup.
-  const sessionMap = new Map<string, { project: string; projectPath?: string; workingDirectory?: string; turns: ClassifiedTurn[]; prLinks?: Set<string>; title?: string }>()
+  const sessionMap = new Map<string, { project: string; projectPath?: string; workingDirectory?: string; turns: ClassifiedTurn[]; prLinks?: Set<string>; title?: string; lineageVotes: Map<string, number> }>()
 
   for (const source of servedSources) {
     const cachedFile = section.files[source.path]
@@ -3932,6 +3993,14 @@ export async function parseProviderSources(
         ? slicedTurn.calls[0].workingDirectory
         : undefined
 
+      // Lineage vote: tally each contributing source's lineage by turn count.
+      // The session's role at the aggregate level is the role of the dominant
+      // source (most turns), with ties broken in favor of 'root' so a parent
+      // session that absorbed a few subagent turns still reads as root. Only
+      // populated when this CachedFile actually has a lineage; a session with
+      // no contributing source carrying lineage gets no field at all.
+      const lineageKey = cachedFile.lineage ? `${cachedFile.lineage.role}|${cachedFile.lineage.parentSessionId ?? ''}` : ''
+
       const existing = sessionMap.get(key)
       if (existing) {
         existing.turns.push(classified)
@@ -3944,7 +4013,10 @@ export async function parseProviderSources(
           for (const link of cachedFile.prLinks) links.add(link)
         }
         if (!existing.title && cachedFile.title) existing.title = cachedFile.title
+        if (lineageKey) existing.lineageVotes.set(lineageKey, (existing.lineageVotes.get(lineageKey) ?? 0) + 1)
       } else {
+        const votes = new Map<string, number>()
+        if (lineageKey) votes.set(lineageKey, 1)
         sessionMap.set(key, {
           project,
           projectPath: slicedTurn.calls[0]?.projectPath,
@@ -3952,6 +4024,7 @@ export async function parseProviderSources(
           turns: [classified],
           ...(cachedFile.prLinks?.length ? { prLinks: new Set(cachedFile.prLinks) } : {}),
           ...(cachedFile.title ? { title: cachedFile.title } : {}),
+          lineageVotes: votes,
         })
       }
     }
@@ -4003,7 +4076,7 @@ export async function parseProviderSources(
             existingEntry.projectPath = slicedTurn.calls[0]!.projectPath
           }
         } else {
-          sessionMap.set(key, { project, projectPath: slicedTurn.calls[0]?.projectPath, workingDirectory: trustedWorkingDirectory, turns: [classified] })
+          sessionMap.set(key, { project, projectPath: slicedTurn.calls[0]?.projectPath, workingDirectory: trustedWorkingDirectory, turns: [classified], lineageVotes: new Map() })
         }
       }
     }
@@ -4125,7 +4198,7 @@ export async function parseProviderSources(
         byTs.set(call.timestamp, list)
       }
       const existing = sessionMap.get(mapKey)
-      const target = existing ?? { project, turns: [] as ClassifiedTurn[] }
+      const target = existing ?? { project, turns: [] as ClassifiedTurn[], lineageVotes: new Map<string, number>() }
       for (const [ts, tsCalls] of byTs) {
         target.turns.push({
           userMessage: '',
@@ -4142,7 +4215,7 @@ export async function parseProviderSources(
   }
 
   const projectMap = new Map<string, { projectPath?: string; sessions: SessionSummary[] }>()
-  for (const [key, { project, projectPath, workingDirectory, turns, prLinks, title }] of sessionMap) {
+  for (const [key, { project, projectPath, workingDirectory, turns, prLinks, title, lineageVotes }] of sessionMap) {
     const sessionId = key.split(':')[1] ?? key
     const assembledTurns = providerName === 'copilot'
       ? foldCopilotSupplementaryTurns(sessionId, turns, copilotRecon?.supplementaryStoreKeys)
@@ -4156,6 +4229,25 @@ export async function parseProviderSources(
     }
     if (workingDirectory) session.workingDirectory = workingDirectory
     if (title) session.title = title
+    // Pick the dominant lineage role across contributing sources. Ties break
+    // toward 'root' (a parent session that absorbed a few subagent turns
+    // still reads as root). No votes = no lineage at all (the CachedFile
+    // never recorded one for this provider's sources, so we don't either).
+    if (lineageVotes.size > 0) {
+      const sorted = [...lineageVotes.entries()].sort((a, b) => {
+        if (b[1] !== a[1]) return b[1] - a[1]
+        return a[0].startsWith('root|') ? -1 : 1
+      })
+      const winner = sorted[0]![0]
+      const sep = winner.indexOf('|')
+      const role = winner.slice(0, sep) as 'root' | 'child'
+      const parentSessionId = winner.slice(sep + 1) || undefined
+      session.lineage = {
+        role,
+        evidence: 'provider-recorded',
+        ...(parentSessionId ? { parentSessionId } : {}),
+      }
+    }
     // Supplementary-only sessions (e.g. a rollup with no per-turn calls) have
     // apiCalls 0 by design but their tokens/cost are real and must serve.
     if (session.apiCalls > 0 || session.totalCostUSD > 0 || session.totalInputTokens + session.totalOutputTokens + session.totalCacheReadTokens + session.totalCacheWriteTokens + session.totalReasoningTokens > 0) {

@@ -137,6 +137,14 @@ export type CachedFile = {
   // tool_use could not be paired (ambiguous multi-result record). Drives a
   // grace-window fallback for a late child. Absent when no pairing was ambiguous.
   ambiguousSpawnAgentIds?: string[]
+  // Kimi Code only: provider-recorded parent/child role for an agent
+  // (resolved from `state.json.agents[<agentName>].parentAgentId` at parse
+  // time so warm runs can read it without re-reading state.json). Claude's
+  // role is derivable from `isSidechain` + `parentSessionId` +
+  // `agentSpawnLinks` and is computed at SessionSummary assembly without
+  // being stored here, so a Claude file's absence of this field is the
+  // common case.
+  lineage?: import('./types.js').Lineage
 }
 
 export type ProviderSection = {
@@ -367,7 +375,14 @@ export const PROVIDER_PARSE_VERSIONS: Record<string, string> = {
   kiro: 'ide-parsing-v1-est-cost-project-path-v1',
   opencode: 'session-model-v1',
   quickdesk: 'emf-sqlite-v2-est-cost',
-  kimicode: 'wire-usage-v1-est-cost',
+  // lineage-v1: every kimicode file now carries a per-file `lineage` resolved
+  // from `state.json.agents[<agentName>].parentAgentId` (provider-recorded
+  // role: 'root' when null, 'child' otherwise). Cached entries from before
+  // this bump have no field, so a warm run would miss the role forever
+  // without a one-time re-parse. Claude needs no bump: its role is
+  // derivable from existing `isSidechain` / `parentSessionId` /
+  // `agentSpawnLinks` and is computed at SessionSummary assembly.
+  kimicode: 'wire-usage-v1-est-cost-lineage-v1',
   'kilo-code': 'worktree-project-grouping-v1-session-model-v1',
   'roo-code': 'worktree-project-grouping-v1',
   warp: 'worktree-project-grouping-v1-est-cost',
@@ -574,6 +589,20 @@ function isOptionalStringRecord(v: unknown): boolean {
   return Object.values(v as Record<string, unknown>).every(e => typeof e === 'string')
 }
 
+// Session-level `lineage` field: provider-recorded parent/child role. Validated
+// defensively so a corrupt entry fails the whole CachedFile (and triggers a
+// re-parse) rather than slipping through as a malformed object. The role is
+// exactly 'root' or 'child' and the evidence is exactly 'provider-recorded' -
+// no inference, no 'unknown' - per the spec rule.
+function isOptionalLineage(v: unknown): boolean {
+  if (v === undefined) return true
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return false
+  const o = v as Record<string, unknown>
+  if (o['role'] !== 'root' && o['role'] !== 'child') return false
+  if (o['evidence'] !== 'provider-recorded') return false
+  return isOptionalString(o['parentSessionId'])
+}
+
 function isToolCall(v: unknown): boolean {
   if (!v || typeof v !== 'object') return false
   const o = v as Record<string, unknown>
@@ -667,6 +696,7 @@ function validateCachedFile(f: unknown): f is CachedFile {
     && isOptionalString(o['parentSessionId'])
     && isOptionalStringRecord(o['agentSpawnLinks'])
     && (o['ambiguousSpawnAgentIds'] === undefined || isStringArray(o['ambiguousSpawnAgentIds']))
+    && isOptionalLineage(o['lineage'])
     && Array.isArray(o['turns'])
     && (o['turns'] as unknown[]).every(validateTurn)
 }
