@@ -4,6 +4,7 @@ import { mkdir, open, readdir, readFile, rename, stat, unlink } from 'fs/promise
 import { join } from 'path'
 
 import { getCodeburnCacheDir } from './cache-dir.js'
+import { getModelCosts } from './models.js'
 import type { DateRange, ProjectSummary } from './types.js'
 
 // Bumped to 27: claude-haiku-4.5 copilot store rows now price correctly (alias added) — #1093.
@@ -172,10 +173,26 @@ import type { DateRange, ProjectSummary } from './types.js'
 // Exclusive providers (Grok and the rest) were under-counted by reasoningTokens
 // in finalized daily rows; inclusive {claude,codex,copilot} were correct there
 // but optimize added reasoning again. Re-derive so report matches the live parse.
+// v30: reprice preserved source-dead slices from their stored per-model tokens
+// (#1132). The partial-survival guard correctly refuses to replace a carried
+// slice when the fresh parse has fewer calls (its source files aged out), but
+// that also pins the slice to its HISTORICAL prices. After a repricing wave
+// (#1118 orcarouter, #1123 copilot, #1101, ...) days whose sources only
+// PARTLY survived under-claim: measured 3 days across a 200-day corpus, ~$46
+// total. Preserved slices carry per-model token counts, so this bump re-derives
+// their COST from current pricing tables (calls and tokens untouched). It runs
+// once per version bump: a `preservedRepriced` stamp records the version it
+// last ran under, so ordinary launches and savings-hash re-derives leave the
+// stamp alone and skip the pass. The reprice follows the tables honestly in
+// BOTH directions: a price cut lowers a slice, a price hike raises it. The
+// never-lose rules are about data presence, not direction - a model absent
+// from current tables keeps its stored cost (never zero a priced slice), and
+// a slice without per-model token detail (pre-v15-era or a provider with no
+// model split) keeps its stored cost untouched.
 // v29: #1118 OrcaRouter route pricing (fusion aliases + peel; auto stays unpriced).
 // v28 on main already shipped #1115.
-export const DAILY_CACHE_VERSION = 29
-const MIN_SUPPORTED_VERSION = 28
+export const DAILY_CACHE_VERSION = 30
+const MIN_SUPPORTED_VERSION = 30
 
 /// Providers whose per-day CALL COUNT means something different at
 /// DAILY_CACHE_VERSION 26 than it did before it. Copilot's supplementary
@@ -303,6 +320,13 @@ export type DailyCache = {
   /// cleared by the first COMPLETE re-derive — persisted rather than computed
   /// so a partial parse in between does not silently spend the entitlement.
   pendingRederive?: string[]
+  /// Version at which the preserved-slices reprice pass (#1132) last ran. When
+  /// absent or strictly less than `DAILY_CACHE_VERSION`, the re-derive path
+  /// reprices every carried/preserved slice from its stored per-model tokens
+  /// through the current pricing tables before saving. Stamped after the first
+  /// run so a savings-hash re-derive, a tz-change re-derive, and ordinary
+  /// launches all leave it alone; only the next version bump re-arms it.
+  preservedRepriced?: number
 }
 
 /** IANA name of the current local timezone (respects the TZ env var). Days are
@@ -460,7 +484,7 @@ function pendingRederiveFor(fromVersion: number, parsed: unknown): string[] | un
   return kept.length > 0 ? kept : undefined
 }
 
-function migratedFrom(parsed: { version: number; lastComputedDate: string | null; savingsConfigHash?: string; tzKey?: string; days: Record<string, unknown>[]; complete?: boolean; watermarkTrusted?: boolean }): DailyCache {
+function migratedFrom(parsed: { version: number; lastComputedDate: string | null; savingsConfigHash?: string; tzKey?: string; days: Record<string, unknown>[]; complete?: boolean; watermarkTrusted?: boolean; preservedRepriced?: number }): DailyCache {
   const pendingRederive = pendingRederiveFor(parsed.version, parsed)
   return {
     ...(pendingRederive ? { pendingRederive } : {}),
@@ -477,6 +501,11 @@ function migratedFrom(parsed: { version: number; lastComputedDate: string | null
     // Absent on a pre-fix cache: the watermark is distrusted once (healing
     // pull-back), then re-stamped by the finalize that follows.
     watermarkTrusted: parsed.watermarkTrusted === true,
+    // Carry the preserved-reprice stamp forward so a re-derive (savings-hash,
+    // tz) on a same-version cache does not re-run the pass the original
+    // version bump already completed. Absent on pre-#1132 caches: their
+    // first re-derive on this binary runs the pass and stamps it.
+    preservedRepriced: typeof parsed.preservedRepriced === 'number' ? parsed.preservedRepriced : undefined,
   }
 }
 
@@ -629,6 +658,7 @@ export function addNewDays(cache: DailyCache, incoming: DailyEntry[], newestDate
     days: applyRetention(merged, newestDate),
     complete: cache.complete,
     watermarkTrusted: cache.watermarkTrusted,
+    preservedRepriced: cache.preservedRepriced,
   }
 }
 
@@ -1154,6 +1184,108 @@ export function mergeDayEntries(
   return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date))
 }
 
+/// Reprice a preserved day's slice from its stored per-model tokens through
+/// the CURRENT pricing tables (#1132). The partial-survival guard keeps a
+/// carried baseline slice whole when the fresh parse has fewer calls
+/// (sources aged out), but that slice's `cost` was frozen under the prices
+/// active when the day was first derived. Repricing runs once after a
+/// DAILY_CACHE_VERSION bump; the caller is responsible for the stamp.
+///
+/// Per-model, per-slice never-lose rules:
+///  - A model absent from current tables (`getModelCosts` returns null) keeps
+///    its stored cost. Pricing drift must never zero a priced slice.
+///  - A slice without a `models` map (pre-v15 era, or a provider that does
+///    not split per model) keeps its stored cost entirely.
+///  - A provider whose stored cost is RECORDED rather than token-derived
+///    (hermes actual_cost_usd, cline-cli costReported, vercel-gateway
+///    total_cost, openclaw costFromProvider, devin committedAcuCost, kiro
+///    credits) is skipped wholesale: re-pricing its tokens would replace a
+///    recorded cost with a token-derived estimate, which loses truth rather
+///    than fixing it.
+///  - Calls, tokens, sessions, savingsUSD, categories and projects are NEVER
+///    touched - only `cost` moves.
+///
+/// A slice whose fresh parse already covered the day (cost was set under
+/// current pricing) reprices to the same number; running over the whole
+/// merged result is a lossless no-op for them and avoids a per-slice
+/// "is this preserved?" probe the merge does not otherwise expose.
+const NON_TOKEN_PRICED_PROVIDERS: ReadonlySet<string> = new Set([
+  'hermes',
+  'cline-cli',
+  'vercel-gateway',
+  'openclaw',
+  'devin',
+  'kiro',
+])
+
+function repriceModelStats(model: string, stored: ModelDayStats): number {
+  const costs = getModelCosts(model)
+  if (!costs) return stored.cost
+  const input = Math.max(0, stored.inputTokens)
+  const output = Math.max(0, stored.outputTokens)
+  const cacheRead = Math.max(0, stored.cacheReadTokens)
+  const cacheWrite = Math.max(0, stored.cacheWriteTokens)
+  return input * costs.inputCostPerToken
+    + output * costs.outputCostPerToken
+    + cacheRead * costs.cacheReadCostPerToken
+    + cacheWrite * costs.cacheWriteCostPerToken
+}
+
+function repriceSlice(slice: ProviderDaySlice): void {
+  if (!slice.models) return
+  let newCost = 0
+  for (const [name, m] of Object.entries(slice.models)) {
+    const newModelCost = repriceModelStats(name, m)
+    m.cost = newModelCost
+    newCost += newModelCost
+  }
+  slice.cost = newCost
+}
+
+export function repricePreservedDays(days: DailyEntry[]): DailyEntry[] {
+  for (const day of days) {
+    const dayModels: Record<string, ModelDayStats> = {}
+    let dayCost = 0
+    let anyRepriced = false
+    for (const provider of Object.keys(day.providers)) {
+      const slice = day.providers[provider]!
+      if (NON_TOKEN_PRICED_PROVIDERS.has(provider)) {
+        dayCost += slice.cost
+        continue
+      }
+      const hadModels = slice.models !== undefined
+      repriceSlice(slice)
+      if (hadModels) anyRepriced = true
+      dayCost += slice.cost
+      for (const [name, m] of Object.entries(slice.models ?? {})) {
+        const acc = dayModels[name] ?? {
+          calls: 0, cost: 0, savingsUSD: 0,
+          inputTokens: 0, outputTokens: 0,
+          cacheReadTokens: 0, cacheWriteTokens: 0,
+        }
+        acc.calls += m.calls
+        acc.cost += m.cost
+        acc.savingsUSD += m.savingsUSD ?? 0
+        acc.inputTokens += m.inputTokens
+        acc.outputTokens += m.outputTokens
+        acc.cacheReadTokens += m.cacheReadTokens
+        acc.cacheWriteTokens += m.cacheWriteTokens
+        dayModels[name] = acc
+      }
+    }
+    if (anyRepriced) {
+      day.cost = dayCost
+      // Rebuild `day.models` from the repriced slices so the day's per-model
+      // totals exactly match what the slices sum to. A model row that only
+      // existed at the day level (slices never carried per-model detail) drops
+      // out, which is the right shape: there is no slice to reprice and no
+      // honest cost to compute for it from a missing token split.
+      day.models = dayModels
+    }
+  }
+  return days
+}
+
 export function getDaysInRange(cache: DailyCache, start: string, end: string): DailyEntry[] {
   return cache.days.filter(d => d.date >= start && d.date <= end)
 }
@@ -1360,6 +1492,19 @@ export async function ensureCacheHydrated(
       const merged = parseWasComplete
         ? mergeDayEntries(freshDays, baseline, true, tzSubtraction, true, pendingRederive)
         : mergeDayEntries(baseline, freshDays, false)
+      // Reprice preserved slices from their stored per-model tokens (issue
+      // #1132). The partial-survival guard keeps carried source-dead slices
+      // whole, but their COST was frozen under the prices active when the
+      // day was first derived. Once per version bump we walk every slice,
+      // recompute the slice's cost from its stored tokens through the
+      // current tables (a model absent from current tables keeps its stored
+      // cost; a slice without per-model detail keeps its stored cost
+      // entirely; calls and tokens never change), then re-sum the day's
+      // totals from the repriced slices. A `preservedRepriced` stamp records
+      // the version the pass last ran under, so savings-hash / tz / ordinary
+      // re-derives all skip it; only the next version bump re-arms it.
+      const stampReprice = parseWasComplete && c.preservedRepriced !== DAILY_CACHE_VERSION
+      const repricedDays = stampReprice ? repricePreservedDays(merged) : merged
       c = {
         version: DAILY_CACHE_VERSION,
         savingsConfigHash,
@@ -1375,11 +1520,14 @@ export async function ensureCacheHydrated(
         // freeze the hole in (retention still anchors on yesterdayStr — the
         // real calendar edge — so holding the watermark can't evict anything).
         lastComputedDate: parseWasComplete ? yesterdayStr : priorWatermark,
-        days: applyRetention(merged, yesterdayStr),
+        days: applyRetention(repricedDays, yesterdayStr),
         complete: parseWasComplete,
         // Stamp the watermark as trusted only when a COMPLETE parse produced it,
         // so a later idle tail under this watermark is not distrusted above.
         watermarkTrusted: parseWasComplete,
+        // Stamp the reprice at the current version so subsequent re-derives
+        // (savings-hash change, tz change) leave the pass alone.
+        ...(stampReprice ? { preservedRepriced: DAILY_CACHE_VERSION } : {}),
       }
       await saveDailyCache(c)
       return c
