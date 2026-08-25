@@ -3,6 +3,8 @@ import { getShortModelName } from './models.js'
 import { inferSessionProvider, sessionBillableOutputTokens } from './session-output.js'
 import { CATEGORY_LABELS } from './types.js'
 import type { ProjectSummary, SessionSummary, TaskCategory } from './types.js'
+import { workUnitSessionKey } from './work-units.js'
+import type { WorkUnitResolution } from './work-units.js'
 
 export type SessionRow = {
   sessionId: string
@@ -54,7 +56,7 @@ export function renderJson(rows: SessionRow[]): string {
   return JSON.stringify(rows, null, 2)
 }
 
-type SessionColumnKey = 'started' | 'session' | 'project' | 'provider' | 'models' | 'cost' | 'saved' | 'calls' | 'turns'
+type SessionColumnKey = 'started' | 'session' | 'children' | 'project' | 'provider' | 'models' | 'cost' | 'saved' | 'calls' | 'turns'
 type SessionColumn = {
   key: SessionColumnKey
   header: string
@@ -82,11 +84,11 @@ function frameWidth(columns: SessionColumn[]): number {
   return 2 + columns.reduce((sum, col) => sum + col.width + 2, 0) + Math.max(0, columns.length - 1)
 }
 
-function fitColumns(columns: SessionColumn[], available: number): SessionColumn[] {
+function fitColumns(columns: SessionColumn[], available: number, dropOrder?: SessionColumnKey[]): SessionColumn[] {
   const fitted = columns.map(col => ({ ...col }))
 
   // Remove low-value columns before squeezing names into unreadable slivers.
-  for (const key of ['turns', 'saved', 'provider', 'calls'] as SessionColumnKey[]) {
+  for (const key of dropOrder ?? ['turns', 'saved', 'provider', 'calls'] as SessionColumnKey[]) {
     if (frameWidth(fitted) <= available) break
     const index = fitted.findIndex(col => col.key === key && col.optional)
     if (index >= 0) fitted.splice(index, 1)
@@ -167,6 +169,9 @@ function cellValue(row: SessionRow, key: SessionColumnKey): string {
   switch (key) {
     case 'started': return row.startedAt ? row.startedAt.replace('T', ' ').slice(0, 16) : '-'
     case 'session': return sessionDisplayName(row)
+    // Only the work-unit view carries a Children column, and it renders
+    // through workUnitCell; a bare SessionRow has no child count.
+    case 'children': return ''
     case 'project': return cleanSessionProjectLabel(row.project)
     case 'provider': return row.provider
     case 'models': return sessionModelLabel(row.models)
@@ -177,12 +182,44 @@ function cellValue(row: SessionRow, key: SessionColumnKey): string {
   }
 }
 
-export function renderTable(rows: SessionRow[], opts: SessionTableOptions = {}): string {
-  const sorted = [...rows].sort((a, b) => b.startedAt.localeCompare(a.startedAt))
-  const hasSavings = sorted.some(row => row.savingsUSD > 0)
-  const allColumns: SessionColumn[] = [
+/// Shared bordered-grid renderer. `cell` produces the raw string for one item
+/// and column; fitting, width expansion, and borders are identical for every
+/// table this module emits, so the default sessions table stays byte-identical.
+function renderSessionGrid<T>(columns: SessionColumn[], items: T[], cell: (item: T, key: SessionColumnKey) => string, footer: string, available: number, dropOrder?: SessionColumnKey[]): string {
+  const fitted = fitColumns(columns, available, dropOrder)
+  const values = items.map(item => fitted.map(col => cell(item, col.key)))
+  // Content can use spare room, but never grow beyond the terminal frame.
+  for (let i = 0; i < fitted.length; i++) {
+    const col = fitted[i]!
+    const longest = Math.max(col.header.length, ...values.map(row => row[i]?.length ?? 0))
+    const spare = available - frameWidth(fitted)
+    const wanted = Math.max(0, Math.min(longest - col.width, spare))
+    col.width += wanted
+  }
+
+  const border = (left: string, middle: string, right: string): string =>
+    left + fitted.map(col => '\u2500'.repeat(col.width + 2)).join(middle) + right
+  const line = (cells: string[]): string => '\u2502' + fitted.map((col, i) => {
+    const value = truncate(cells[i] ?? '', col.width)
+    const padding = ' '.repeat(Math.max(0, col.width - value.length))
+    return ` ${col.right ? padding + value : value + padding} `
+  }).join('\u2502') + '\u2502'
+
+  return [
+    border('\u250c', '\u252c', '\u2510'),
+    line(fitted.map(col => col.header)),
+    border('\u251c', '\u253c', '\u2524'),
+    ...values.map(line),
+    border('\u2514', '\u2534', '\u2518'),
+    footer,
+  ].join('\n')
+}
+
+function sessionColumns(hasSavings: boolean, childrenColumn: boolean): SessionColumn[] {
+  return [
     { key: 'started', header: 'Started', width: 16, minWidth: 10 },
     { key: 'session', header: 'Session', width: 30, minWidth: 12, flex: 3 },
+    ...(childrenColumn ? [{ key: 'children' as const, header: 'Children', width: 8, minWidth: 5, right: true, optional: true }] : []),
     { key: 'project', header: 'Project', width: 24, minWidth: 10, flex: 2 },
     { key: 'provider', header: 'Provider', width: 9, minWidth: 8, optional: true },
     { key: 'models', header: 'Models', width: 22, minWidth: 10, flex: 2 },
@@ -191,36 +228,114 @@ export function renderTable(rows: SessionRow[], opts: SessionTableOptions = {}):
     { key: 'calls', header: 'Calls', width: 7, minWidth: 5, right: true, optional: true },
     { key: 'turns', header: 'Turns', width: 7, minWidth: 5, right: true, optional: true },
   ]
+}
+
+export function renderTable(rows: SessionRow[], opts: SessionTableOptions = {}): string {
+  const sorted = [...rows].sort((a, b) => b.startedAt.localeCompare(a.startedAt))
+  const hasSavings = sorted.some(row => row.savingsUSD > 0)
   const available = Math.max(60, opts.terminalWidth ?? defaultTerminalWidth())
-  const columns = fitColumns(allColumns, available)
-  const values = sorted.map(row => columns.map(col => cellValue(row, col.key)))
-  // Content can use spare room, but never grow beyond the terminal frame.
-  for (let i = 0; i < columns.length; i++) {
-    const col = columns[i]!
-    const longest = Math.max(col.header.length, ...values.map(row => row[i]?.length ?? 0))
-    let spare = available - frameWidth(columns)
-    const wanted = Math.max(0, Math.min(longest - col.width, spare))
-    col.width += wanted
-  }
-
-  const border = (left: string, middle: string, right: string): string =>
-    left + columns.map(col => '\u2500'.repeat(col.width + 2)).join(middle) + right
-  const line = (cells: string[]): string => '\u2502' + columns.map((col, i) => {
-    const value = truncate(cells[i] ?? '', col.width)
-    const padding = ' '.repeat(Math.max(0, col.width - value.length))
-    return ` ${col.right ? padding + value : value + padding} `
-  }).join('\u2502') + '\u2502'
-
   const totalCost = sorted.reduce((sum, row) => sum + row.cost, 0)
   const footer = `${sorted.length.toLocaleString('en-US')} sessions  \u2022  $${totalCost.toFixed(2)} total  \u2022  newest first`
-  return [
-    border('\u250c', '\u252c', '\u2510'),
-    line(columns.map(col => col.header)),
-    border('\u251c', '\u253c', '\u2524'),
-    ...values.map(line),
-    border('\u2514', '\u2534', '\u2518'),
-    footer,
-  ].join('\n')
+  return renderSessionGrid(sessionColumns(hasSavings, false), sorted, cellValue, footer, available)
+}
+
+/// One printed line in the work-unit view: a unit row (aggregate of root plus
+/// children, `childCount > 0`), a standalone row, or an indented child detail
+/// row (`depth === 1`).
+export type WorkUnitDisplay = { row: SessionRow; depth: 0 | 1; childCount: number }
+
+function workUnitCell(display: WorkUnitDisplay, key: SessionColumnKey): string {
+  if (key === 'children') return display.childCount > 0 ? String(display.childCount) : ''
+  if (key === 'session') {
+    const name = sessionDisplayName(display.row)
+    return display.depth === 1 ? `  \u21b3 ${name}` : name
+  }
+  return cellValue(display.row, key)
+}
+
+/// The `sessions --by-work-unit` table: one row per multi-session work unit
+/// (root's title/project, cost/calls/savings/turns summed over root+children,
+/// child count in the Children column), its children indented beneath, and
+/// every standalone session exactly as in the default table. Entries sort
+/// newest-first by each unit's latest member activity. The footer total sums
+/// top-level entries only, so the grouped view reconciles exactly with the
+/// ungrouped table (no double count, no dropped spend).
+export function renderWorkUnitTable(rows: SessionRow[], resolution: WorkUnitResolution, opts: SessionTableOptions = {}): string {
+  const unitById = new Map(resolution.units.map(unit => [unit.workUnitId, unit]))
+  const membersByUnit = new Map<string, SessionRow[]>()
+  const singles: SessionRow[] = []
+  for (const row of rows) {
+    const unitId = resolution.bySession.get(workUnitSessionKey(row.provider, row.sessionId))
+    const unit = unitId !== undefined ? unitById.get(unitId) : undefined
+    // Group only units that actually have a root and at least one child in
+    // this view; everything else renders exactly as in the default table.
+    if (unitId === undefined || !unit || unit.childSessionIds.length === 0) { singles.push(row); continue }
+    const list = membersByUnit.get(unitId)
+    if (list) list.push(row)
+    else membersByUnit.set(unitId, [row])
+  }
+
+  type Entry = { display: WorkUnitDisplay; children: WorkUnitDisplay[]; sortKey: string }
+  const entries: Entry[] = singles.map(row => ({ display: { row, depth: 0 as const, childCount: 0 }, children: [], sortKey: row.startedAt }))
+  for (const [unitId, members] of membersByUnit) {
+    const unit = unitById.get(unitId)!
+    const rootRow = members.find(row => row.sessionId === unit.rootSessionId)
+    if (!rootRow || members.length < 2) {
+      for (const row of members) entries.push({ display: { row, depth: 0, childCount: 0 }, children: [], sortKey: row.startedAt })
+      continue
+    }
+    const childRows = members
+      .filter(row => row !== rootRow)
+      .sort((a, b) => b.startedAt.localeCompare(a.startedAt) || a.sessionId.localeCompare(b.sessionId))
+    const sum = (pick: (row: SessionRow) => number): number => members.reduce((total, row) => total + pick(row), 0)
+    const startedAt = members.reduce((min, row) => (row.startedAt < min ? row.startedAt : min), rootRow.startedAt)
+    const endedAt = members.reduce((max, row) => (row.endedAt > max ? row.endedAt : max), rootRow.endedAt)
+    const models: string[] = []
+    for (const member of [rootRow, ...childRows]) {
+      for (const model of member.models) if (!models.includes(model)) models.push(model)
+    }
+    const aggregate: SessionRow = {
+      ...rootRow,
+      models,
+      cost: sum(row => row.cost),
+      savingsUSD: sum(row => row.savingsUSD),
+      calls: sum(row => row.calls),
+      turns: sum(row => row.turns),
+      inputTokens: sum(row => row.inputTokens),
+      outputTokens: sum(row => row.outputTokens),
+      cacheReadTokens: sum(row => row.cacheReadTokens),
+      cacheWriteTokens: sum(row => row.cacheWriteTokens),
+      startedAt,
+      endedAt,
+      durationMs: durationMs(startedAt, endedAt),
+    }
+    const sortKey = members.reduce((max, row) => (row.startedAt > max ? row.startedAt : max), '')
+    entries.push({
+      display: { row: aggregate, depth: 0, childCount: childRows.length },
+      children: childRows.map(row => ({ row, depth: 1 as const, childCount: 0 })),
+      sortKey,
+    })
+  }
+  entries.sort((a, b) => b.sortKey.localeCompare(a.sortKey))
+
+  const displays = entries.flatMap(entry => [entry.display, ...entry.children])
+  const hasSavings = rows.some(row => row.savingsUSD > 0)
+  const available = Math.max(60, opts.terminalWidth ?? defaultTerminalWidth())
+  // Money invariant: the footer sums TOP-LEVEL entries (unit aggregates plus
+  // standalone rows), never the indented child detail, so grouped and
+  // ungrouped views total the same spend.
+  const totalCost = entries.reduce((total, entry) => total + entry.display.row.cost, 0)
+  const unitCount = entries.filter(entry => entry.display.childCount > 0).length
+  const footer = `${rows.length.toLocaleString('en-US')} sessions  \u2022  ${unitCount.toLocaleString('en-US')} work unit${unitCount === 1 ? '' : 's'}  \u2022  $${totalCost.toFixed(2)} total  \u2022  newest first`
+  return renderSessionGrid(sessionColumns(hasSavings, true), displays, workUnitCell, footer, available, ['children', 'turns', 'saved', 'provider', 'calls'])
+}
+
+/// `sessions --by-work-unit --format json`: an add-only envelope. `sessions`
+/// is the exact row array the default json output emits today; `workUnits` is
+/// the resolver's full partition (standalone sessions included, so consumers
+/// can reconcile counts and totals).
+export function renderWorkUnitJson(rows: SessionRow[], resolution: WorkUnitResolution): string {
+  return JSON.stringify({ sessions: rows, workUnits: resolution.units }, null, 2)
 }
 
 export type PrRow = {

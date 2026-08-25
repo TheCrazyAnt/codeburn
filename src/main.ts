@@ -2375,12 +2375,13 @@ program
   .option('--provider <provider>', 'Filter by provider (e.g. claude, codex, cursor)', 'all')
   .option('--format <format>', 'Output format: table, json', 'table')
   .option('--by-pr', 'Group spend by the pull requests each session referenced')
+  .option('--by-work-unit', 'Group sessions into provider-recorded work units: one row per orchestration root with its delegated children folded beneath')
   .option('--no-pager', 'Print the complete table directly instead of opening the interactive browser')
   .action(async (opts) => {
     assertProvider(opts.provider, 'sessions')
     assertFormat(opts.format, ['table', 'json'], 'sessions')
-    const { aggregateSessions, buildPrAttribution, renderJson, renderTable } = await import('./sessions-report.js')
-    const wantsInteractive = opts.format === 'table' && !opts.byPr && opts.pager !== false && process.stdin.isTTY === true && process.stdout.isTTY === true
+    const { aggregateSessions, buildPrAttribution, renderJson, renderTable, renderWorkUnitJson, renderWorkUnitTable } = await import('./sessions-report.js')
+    const wantsInteractive = opts.format === 'table' && !opts.byPr && !opts.byWorkUnit && opts.pager !== false && process.stdin.isTTY === true && process.stdout.isTTY === true
     if (wantsInteractive) setInteractiveScanUI()
     await loadPricing()
 
@@ -2446,6 +2447,21 @@ program
       return
     }
     const rows = aggregateSessions(projects)
+    if (opts.byWorkUnit) {
+      const { resolveWorkUnits } = await import('./work-units.js')
+      const { inferSessionProvider } = await import('./session-output.js')
+      const resolution = resolveWorkUnits(projects.flatMap(project => project.sessions.map(session => ({
+        sessionId: session.sessionId,
+        provider: inferSessionProvider(session),
+        lineage: session.lineage,
+      }))))
+      if (opts.format === 'json') {
+        process.stdout.write(renderWorkUnitJson(rows, resolution) + '\n')
+        return
+      }
+      process.stdout.write(renderWorkUnitTable(rows, resolution) + '\n')
+      return
+    }
     if (opts.format === 'json') {
       process.stdout.write(renderJson(rows) + '\n')
       return

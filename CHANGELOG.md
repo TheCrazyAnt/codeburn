@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added
+- **`codeburn sessions --by-work-unit` groups the sessions report into provider-recorded work units.** The new deterministic resolver (`src/work-units.ts`) folds each session carrying the #1140 `lineage` field under the orchestration root it names, giving one row per unit with the root's title and project, cost/calls summed over root plus children, and a child count, with the children listed indented beneath and standalone sessions rendered exactly as before. A work unit's id is `deriveTraceId(rootSessionId)`, the exact trace-id derivation sync already uses, so a unit's identity matches the root's existing trace identity. Evidence stays strictly provider-recorded: a session without lineage is its own standalone unit with role `unknown`, a child that names an in-range parent folds even when the parent recorded nothing (one-sided evidence), and anything ambiguous fails closed per the boundary spec's MAIN-02 - a parent id outside the parsed window leaves the child ungrouped, cycles and self-references are broken and marked `unknown`, and duplicate or cross-provider id collisions never fold. `--format json` with the flag emits an add-only `{ sessions, workUnits }` envelope: `sessions` is today's row array unchanged, `workUnits` is the resolver's full partition (standalone sessions included, so counts and totals reconcile). Default output without the flag is byte-identical, no wire/sync or daily-cache behavior changes, and a pinning test asserts the grouped footer total equals the ungrouped total. Implements slice CB-2 of the CodeBurn main/Teams boundary spec (CODEBURN-MAIN-TEAMS-BOUNDARY-v0.1). (#1140)
+
 ## 0.9.22 - 2026-08-25
 
 ### Added
