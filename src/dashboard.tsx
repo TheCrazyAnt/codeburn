@@ -1522,6 +1522,11 @@ export function InteractiveDashboard({ initialProjects, initialDailyHistoryProje
   const indexPendingFiles = initialIndexPendingFiles ?? 0
   const [indexing, setIndexing] = useState(indexPendingFiles > 0)
   const [indexedFiles, setIndexedFiles] = useState(0)
+  // #1143: a first q during the post-paint background fill arms quit and
+  // shows a status line instead of exiting; a second q (or any Ctrl+C) exits
+  // through the same path. Reset to false the moment the fill completes, so a
+  // later fill that races a quit-press doesn't leave the status line stuck on.
+  const [quitArmed, setQuitArmed] = useState(false)
   const isDayMode = dayDate != null
   const isCustomRange = customRange != null && !isDayMode
   const scrollableDailyHistory = !isCustomRange && !isDayMode
@@ -1703,6 +1708,7 @@ export function InteractiveDashboard({ initialProjects, initialDailyHistoryProje
     void reloadData(initialPeriod, initialProvider, initialDay ?? null, true).finally(() => {
       clearInterval(id)
       setIndexing(false)
+      setQuitArmed(false)
     })
     return () => clearInterval(id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1754,7 +1760,16 @@ export function InteractiveDashboard({ initialProjects, initialDailyHistoryProje
   }, [switchDay])
 
   useInput((input, key) => {
-    if (input === 'q' || (key.ctrl && input === 'c')) { exit(); return }
+    if (key.ctrl && input === 'c') { exit(); return }
+    if (input === 'q') {
+      // #1143: a fill draining silently for ~16.5s on a 21k-file corpus is the
+      // wrong trade. If a fill is still in flight, the first q arms quit and
+      // surfaces a status line; the second q (or any Ctrl+C) exits through the
+      // same abrupt path #1109 made kill-safe. With no fill, q exits as before.
+      if (indexing && !quitArmed) { setQuitArmed(true); return }
+      exit()
+      return
+    }
     if (input === 'o' && view === 'dashboard' && optimizeAvailable) { void loadOptimizeResult(); return }
     if ((input === 'b' || key.escape) && view === 'optimize') { setView('dashboard'); setFindingsCursor(0); return }
     if (view === 'optimize') {
@@ -1847,6 +1862,7 @@ export function InteractiveDashboard({ initialProjects, initialDailyHistoryProje
             ? <Panel title="CodeBurn Optimize" color={ORANGE} width={dashWidth}><Text dimColor>Scanning {headerLabel}...</Text></Panel>
             : <Panel title="CodeBurn" color={ORANGE} width={dashWidth}><Text dimColor>Loading {headerLabel}...</Text></Panel>}
         {view !== 'compare' && <StatusBar width={dashWidth} showProvider={multipleProviders} view={view} findingCount={0} optimizeAvailable={false} compareAvailable={false} customRange={isCustomRange} dayMode={isDayMode} />}
+        {quitArmed && <QuitStatusLine width={dashWidth} />}
       </Box>
     )
     : (
@@ -1866,6 +1882,7 @@ export function InteractiveDashboard({ initialProjects, initialDailyHistoryProje
           </Box>
         )}
         {view !== 'compare' && <StatusBar width={dashWidth} showProvider={multipleProviders} view={view} findingCount={findingCount} optimizeAvailable={optimizeAvailable} compareAvailable={compareAvailable} customRange={isCustomRange} dayMode={isDayMode} />}
+        {quitArmed && <QuitStatusLine width={dashWidth} />}
       </Box>
     )
 
@@ -1889,6 +1906,21 @@ function IndexingBanner({ width, done, total }: { width: number; done: number; t
       <Text wrap="truncate-end">
         <Text color={ORANGE} bold>indexing </Text>
         <Text dimColor>history · {Math.min(done, total)}/{total} files · totals below cover what is indexed so far</Text>
+      </Text>
+    </Box>
+  )
+}
+
+/// Status line shown after the first q during an active fill (#1143). The fill
+/// buys a warm next launch, so the first press is treated as a request to
+/// finish; a second q (or any Ctrl+C) takes the abrupt path. Matches the
+/// IndexingBanner's color/shape so the two read as a pair.
+function QuitStatusLine({ width }: { width: number }) {
+  return (
+    <Box width={width} paddingX={1}>
+      <Text wrap="truncate-end">
+        <Text color={ORANGE} bold>quitting </Text>
+        <Text dimColor>Finishing background index so the next launch starts warm - press q or Ctrl+C again to quit now</Text>
       </Text>
     </Box>
   )
