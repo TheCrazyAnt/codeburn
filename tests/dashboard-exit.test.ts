@@ -194,6 +194,9 @@ describe('InteractiveDashboard quit feedback during the cold-start fill (#1143)'
     const exited = app.waitUntilExit()
     stdin.write('q')
     await expect(exited).resolves.toBeUndefined()
+    // Flush the unmount's final frame into the captured buffer first - a
+    // teardown-frame render of the line would otherwise be invisible here.
+    await new Promise(resolve => setTimeout(resolve, 50))
     // Belt-and-braces: nothing in the rendered history should mention the
     // "Finishing background index" line - no flicker on the no-fill path.
     expect(chunks.join('')).not.toContain(QUIT_STATUS)
