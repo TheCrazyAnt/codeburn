@@ -95,8 +95,20 @@ Each AI interaction becomes one OTLP span with these attributes:
 | `ai.cost_usd` | `0.085` | Estimated cost |
 | `ai.project` | `my-app` | Project basename, only when backed by an exact provider-recorded working directory; otherwise omitted |
 | `ai.tools` | `["Edit", "Bash"]` | Tools invoked |
+| `ai.speed` | `standard` | Provider-recorded speed tier |
+| `ai.cost_estimated` | `true` | Whether the cost is an estimate rather than provider-reported |
+| `ai.cache_read_tokens` | `800` | Cache-read tokens, only when the provider recorded a non-zero value |
+| `ai.cache_write_tokens` | `200` | Cache-creation tokens, only when the provider recorded a non-zero value |
+| `ai.call_count` | `3` | Usage spans the span's session contributes in the synced window |
+| `ai.session_duration_ms` | `61000` | First-to-last provider-recorded event time; omitted when either end is missing or unordered |
+| `ai.subscription_covered` | `true` | Cost covered by a configured plan or proxy path; omitted when the plan/proxy machinery cannot decide |
+| `ai.work_unit_id` | `9f2c…` | Pseudonymous work-unit id (the root session's trace id), grouping a session with its delegated children |
+| `ai.session_role` | `root`, `child` | The session's relationship to its work unit |
+| `ai.lineage_evidence` | `provider-recorded` | The evidence class behind the grouping |
 
-A pseudonymous `device_id` distinguishes your machines without revealing hostnames.
+A pseudonymous `device_id` distinguishes your machines without revealing hostnames. Each export batch also carries a `codeburn.coverage_through` resource attribute: the ISO date your local history is complete through, stamped only when a complete local parse finalized that watermark.
+
+The three lineage fields appear only when your AI tool itself recorded the relationship on disk (today: Claude subagent transcripts and Kimi Code subagent sessions). They are never inferred from timing, shared projects, or directories, and they contain no prompt, title, raw session or agent id, or path: `ai.work_unit_id` is the same SHA-256 derivation the trace id already uses. A session whose parent was not observed (for example, outside the synced window) stays separate rather than being guessed into a group, and a session with no recorded lineage carries none of the three fields.
 
 ### Git attribution (opt-in: `--attribution`)
 

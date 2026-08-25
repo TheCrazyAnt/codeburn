@@ -277,8 +277,19 @@ export function registerSyncCommands(program: Command): void {
         const projects = (await parseAllSessions(range))
           .map(p => ({ ...p, project: wireProjectName(p.projectPath, p.project) }))
 
+        // Local-only inputs to the CB-3 fields: configured plans decide
+        // ai.subscription_covered; the daily-cache watermark stamps
+        // codeburn.coverage_through (only when a complete parse finalized it).
+        const { readPlans } = await import('../config.js')
+        const plans = await readPlans()
+        const { loadDailyCache } = await import('../daily-cache.js')
+        const dailyCache = await loadDailyCache()
+        const coverageThrough = dailyCache.complete === true && dailyCache.watermarkTrusted === true && dailyCache.lastComputedDate
+          ? dailyCache.lastComputedDate
+          : undefined
+
         // Flatten + filter against sent-ledger
-        const { allCalls, unsent, held, frozen } = collectUnsentCalls(projects)
+        const { allCalls, unsent, held, frozen } = collectUnsentCalls(projects, Date.now(), { plans })
 
         // Attribution records (opt-in): session→commit correlation computed
         // locally from the same parsed projects. Reuses the yield engine.
@@ -303,6 +314,14 @@ export function registerSyncCommands(program: Command): void {
             process.stderr.write(`[dry-run] ${frozen.length} Copilot calls frozen: their sessions were already synced in the other shape (rollup vs per-request), and a usage span cannot be retracted. See docs/sync/README.md.\n`)
           }
           process.stderr.write(`[dry-run] Would push ${toPushCount} calls ($${cost.toFixed(2)}) to ${config.baseUrl}${config.tracesPath}\n`)
+          const toPushList = unsent.slice(0, MAX_PER_PUSH)
+          const withLineage = toPushList.filter(c => c.session?.workUnitId !== undefined).length
+          const withCacheTokens = toPushList.filter(c =>
+            Math.max(c.call.usage.cacheReadInputTokens, c.call.usage.cachedInputTokens) > 0
+            || c.call.usage.cacheCreationInputTokens > 0).length
+          const covered = toPushList.filter(c => c.session?.subscriptionCovered === true).length
+          const uncovered = toPushList.filter(c => c.session?.subscriptionCovered === false).length
+          process.stderr.write(`[dry-run] Fields: ${withLineage}/${toPushCount} spans carry lineage (ai.work_unit_id/session_role/lineage_evidence), ${withCacheTokens} carry cache tokens, ai.subscription_covered true on ${covered} / false on ${uncovered} / omitted on ${toPushCount - covered - uncovered}; codeburn.coverage_through: ${coverageThrough ?? 'unavailable'}\n`)
           if (unsent.length > MAX_PER_PUSH) {
             process.stderr.write(`[dry-run] ${unsent.length - MAX_PER_PUSH} more calls exceed the ${MAX_PER_PUSH} safety limit — a second push would be needed\n`)
           }
@@ -347,6 +366,7 @@ export function registerSyncCommands(program: Command): void {
             endpoint,
             accessToken: tokens.access_token,
             batches,
+            ...(coverageThrough ? { coverageThrough } : {}),
             log: msg => process.stderr.write(`${msg}\n`),
           })
         }

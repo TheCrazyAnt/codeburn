@@ -6,6 +6,10 @@
  */
 
 import type { ProjectSummary } from '../types.js'
+import type { PlanMap, PlanProvider } from '../config.js'
+import { isProxiedPath } from '../models.js'
+import { inferSessionProvider } from '../session-output.js'
+import { resolveWorkUnits, workUnitSessionKey } from '../work-units.js'
 import { assertHttps } from './discovery.js'
 import { ledgerKeySet, appendToLedger, type LedgerEntry } from './ledger.js'
 import {
@@ -13,7 +17,9 @@ import {
   batchCalls,
   buildAttributionOtlpPayload,
   flattenAttributionRecords,
+  deriveTraceId,
   type CallWithSession,
+  type SessionWireContext,
   type AttributionItem,
   type OtlpPayload,
 } from './otlp.js'
@@ -169,8 +175,65 @@ function newestDatableTs(timestamps: readonly string[], now: number): number | n
   return newest
 }
 
+export interface CollectOptions {
+  /**
+   * Configured plans (readPlans()), for the ai.subscription_covered decision.
+   * Treated as "no plans configured" when omitted.
+   */
+  plans?: PlanMap
+}
+
+/**
+ * True when a configured plan covers this provider. A plan with id 'none' is
+ * the recorded absence of a plan, not coverage.
+ */
+function planCoversProvider(plans: PlanMap, provider: string): boolean {
+  return [plans[provider as PlanProvider], plans.all]
+    .some(plan => plan !== undefined && plan.id !== 'none')
+}
+
+/**
+ * The ai.subscription_covered decision: true when a configured plan covers the
+ * call's provider or the session's provider-recorded cwd sits under a
+ * configured proxy path; false when the machinery can rule both out; undefined
+ * (omit the attribute) when there is no plan match and no cwd to proxy-check.
+ */
+function subscriptionCoveredFor(plans: PlanMap, provider: string, workingDirectory: string | undefined): boolean | undefined {
+  if (planCoversProvider(plans, provider)) return true
+  if (workingDirectory !== undefined) return isProxiedPath(workingDirectory)
+  return undefined
+}
+
+/**
+ * Lineage context for one session, from the #1140 lineage field plus the
+ * #1145 resolver derivation. Only provider-recorded lineage emits anything:
+ * a recorded root derives its own work-unit id, a recorded child takes the id
+ * of the unit the resolver folded it into, and anything the resolver fails
+ * closed on (parent out of range, cycle, ambiguous id) emits nothing.
+ */
+function lineageContext(
+  session: ProjectSummary['sessions'][number],
+  provider: string,
+  resolution: ReturnType<typeof resolveWorkUnits>,
+  unitById: ReadonlyMap<string, ReturnType<typeof resolveWorkUnits>['units'][number]>,
+): Pick<SessionWireContext, 'workUnitId' | 'sessionRole'> {
+  const lineage = session.lineage
+  if (lineage?.evidence !== 'provider-recorded') return {}
+  if (lineage.role === 'root') {
+    return { workUnitId: deriveTraceId(session.sessionId), sessionRole: 'root' }
+  }
+  if (lineage.role === 'child' && lineage.parentSessionId) {
+    const workUnitId = resolution.bySession.get(workUnitSessionKey(provider, session.sessionId))
+    const unit = workUnitId ? unitById.get(workUnitId) : undefined
+    if (workUnitId && unit?.roles[session.sessionId] === 'child') {
+      return { workUnitId, sessionRole: 'child' }
+    }
+  }
+  return {}
+}
+
 /** Flatten parsed projects into individual calls and filter out already-sent ones. */
-export function collectUnsentCalls(projects: ProjectSummary[], now: number = Date.now()): {
+export function collectUnsentCalls(projects: ProjectSummary[], now: number = Date.now(), opts?: CollectOptions): {
   allCalls: CallWithSession[]
   unsent: CallWithSession[]
   /** Not yet sent because their session is still reconciling. Retried later. */
@@ -178,16 +241,42 @@ export function collectUnsentCalls(projects: ProjectSummary[], now: number = Dat
   /** Never sent: the receiver already holds this session in the other shape. */
   frozen: CallWithSession[]
 } {
+  const plans = opts?.plans ?? {}
+
+  // Lineage resolves over every session in the window, never just the unsent
+  // slice: a child whose root was already synced still names the same unit.
+  const resolution = resolveWorkUnits(projects.flatMap(project =>
+    project.sessions.map(session => ({
+      sessionId: session.sessionId,
+      provider: inferSessionProvider(session),
+      lineage: session.lineage,
+    })),
+  ))
+  const unitById = new Map(resolution.units.map(unit => [unit.workUnitId, unit]))
+
   const allCalls: CallWithSession[] = []
   for (const project of projects) {
     for (const session of project.sessions) {
+      const provider = inferSessionProvider(session)
+      let callCount = 0
+      for (const turn of session.turns) callCount += turn.assistantCalls.length
+      const first = Date.parse(session.firstTimestamp)
+      const last = Date.parse(session.lastTimestamp)
+      const durationMs = !isNaN(first) && !isNaN(last) && last >= first ? last - first : undefined
+      const sessionContext: SessionWireContext = {
+        callCount,
+        ...(durationMs !== undefined ? { durationMs } : {}),
+        ...lineageContext(session, provider, resolution, unitById),
+      }
       for (const turn of session.turns) {
         for (const call of turn.assistantCalls) {
+          const covered = subscriptionCoveredFor(plans, call.provider, session.workingDirectory)
           allCalls.push({
             call,
             sessionId: session.sessionId,
             project: project.project,
             workingDirectory: session.workingDirectory,
+            session: covered !== undefined ? { ...sessionContext, subscriptionCovered: covered } : sessionContext,
           })
         }
       }
@@ -254,6 +343,8 @@ export interface SendBatchesOptions {
   accessToken: string
   batches: CallWithSession[][]
   log?: (msg: string) => void
+  /** ISO date stamped as codeburn.coverage_through on every batch. Omit when unproven. */
+  coverageThrough?: string
   /** Injectable sleep for tests. Defaults to real setTimeout. */
   sleep?: (ms: number) => Promise<void>
   /** Max wait per 429 (caps Retry-After). Default 120s. */
@@ -287,7 +378,7 @@ export function parseRetryAfterMs(value: string | null): number | null {
 export async function sendBatches(opts: SendBatchesOptions): Promise<PushResult> {
   return sendBatchesCore({
     ...opts,
-    buildPayload: buildOtlpPayload,
+    buildPayload: batch => buildOtlpPayload(batch, opts.coverageThrough ? { coverageThrough: opts.coverageThrough } : undefined),
     toOutbound: c => ({ key: c.call.deduplicationKey, ts: c.call.timestamp, costUSD: c.call.costUSD }),
   })
 }

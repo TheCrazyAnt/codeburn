@@ -95,6 +95,25 @@ export interface CallWithSession {
   project?: string
   /** Exact provider-recorded cwd. Synthetic labels and storage paths are excluded upstream. */
   workingDirectory?: string
+  /** Session-level wire context (CB-3). Absent on callers that predate it. */
+  session?: SessionWireContext
+}
+
+/**
+ * Session-level facts a usage span may carry (CB-3, boundary spec section 7).
+ * Every field is optional and emitted only when its value is proven; a session
+ * without provider-recorded lineage carries no workUnitId/sessionRole at all.
+ */
+export interface SessionWireContext {
+  /** Usage spans this session contributes in the parsed window. */
+  callCount: number
+  /** last - first provider-recorded event time. Undefined when either end is missing or unordered. */
+  durationMs?: number
+  /** deriveTraceId(root session id), the same derivation trace ids use. */
+  workUnitId?: string
+  sessionRole?: 'root' | 'child'
+  /** Plan/proxy-path decision. Undefined when the machinery cannot decide. */
+  subscriptionCovered?: boolean
 }
 
 function isEmailOrCredentialShaped(value: string): boolean {
@@ -179,10 +198,19 @@ function safeProjectAttribute(project: string | undefined): OtlpAttribute | null
   return { key: 'ai.project', value: { stringValue: project } }
 }
 
-export function buildOtlpPayload(calls: CallWithSession[]): OtlpPayload {
+export interface BuildOtlpOptions {
+  /**
+   * ISO date the local corpus is complete through (daily-cache watermark),
+   * stamped on the export batch as a resource attribute. Omit when the
+   * watermark is not trusted.
+   */
+  coverageThrough?: string
+}
+
+export function buildOtlpPayload(calls: CallWithSession[], opts?: BuildOtlpOptions): OtlpPayload {
   const deviceId = getDeviceId()
 
-  const spans: OtlpSpan[] = calls.map(({ call, sessionId, workingDirectory }) => {
+  const spans: OtlpSpan[] = calls.map(({ call, sessionId, workingDirectory, session }) => {
     const startNano = toUnixNano(call.timestamp)
     // End time = start + 1ms (we don't have real duration, but OTLP requires both)
     const endNano = (BigInt(startNano) + 1_000_000n).toString()
@@ -216,6 +244,45 @@ export function buildOtlpPayload(calls: CallWithSession[]): OtlpPayload {
     const isEstimated = call.provider === 'kiro' || call.usage.inputTokens === 0
     attributes.push({ key: 'ai.cost_estimated', value: { boolValue: isEstimated } })
 
+    // --- CB-3 additive fields (boundary spec section 7). Each is emitted only
+    // when its value is proven; an old receiver ignoring them loses nothing.
+
+    // Lineage: all three or none, and never inferred. The trio survives or
+    // falls together through the same #1128 sanitizers as the other strings.
+    if (session?.workUnitId && session.sessionRole) {
+      const workUnitId = sanitizeIdentifier(session.workUnitId, 64)
+      const role = sanitizeIdentifier(session.sessionRole, 16)
+      const evidence = sanitizeIdentifier('provider-recorded', 32)
+      if (workUnitId && role && evidence) {
+        attributes.push(
+          { key: 'ai.work_unit_id', value: { stringValue: workUnitId } },
+          { key: 'ai.session_role', value: { stringValue: role } },
+          { key: 'ai.lineage_evidence', value: { stringValue: evidence } },
+        )
+      }
+    }
+
+    // Cache tokens, billable-consistent with ai.input_tokens: providers record
+    // cache reads in exactly one vocabulary (Anthropic-style cacheRead or
+    // OpenAI-style cached-subset, the display layer's Math.max convention).
+    const cacheRead = Math.max(call.usage.cacheReadInputTokens, call.usage.cachedInputTokens)
+    if (cacheRead > 0) {
+      attributes.push({ key: 'ai.cache_read_tokens', value: { intValue: String(cacheRead) } })
+    }
+    if (call.usage.cacheCreationInputTokens > 0) {
+      attributes.push({ key: 'ai.cache_write_tokens', value: { intValue: String(call.usage.cacheCreationInputTokens) } })
+    }
+
+    if (session) {
+      attributes.push({ key: 'ai.call_count', value: { intValue: String(session.callCount) } })
+      if (session.durationMs !== undefined) {
+        attributes.push({ key: 'ai.session_duration_ms', value: { intValue: String(session.durationMs) } })
+      }
+      if (session.subscriptionCovered !== undefined) {
+        attributes.push({ key: 'ai.subscription_covered', value: { boolValue: session.subscriptionCovered } })
+      }
+    }
+
     return {
       traceId: deriveTraceId(sessionId),
       spanId: deriveSpanId(call.deduplicationKey),
@@ -226,12 +293,18 @@ export function buildOtlpPayload(calls: CallWithSession[]): OtlpPayload {
     }
   })
 
+  const resourceAttributes: OtlpAttribute[] = [
+    { key: 'codeburn.device_id', value: { stringValue: deviceId } },
+  ]
+  const coverageThrough = opts?.coverageThrough ? sanitizeIdentifier(opts.coverageThrough, 32) : undefined
+  if (coverageThrough) {
+    resourceAttributes.push({ key: 'codeburn.coverage_through', value: { stringValue: coverageThrough } })
+  }
+
   return {
     resourceSpans: [{
       resource: {
-        attributes: [
-          { key: 'codeburn.device_id', value: { stringValue: deviceId } },
-        ],
+        attributes: resourceAttributes,
       },
       scopeSpans: [{
         spans,

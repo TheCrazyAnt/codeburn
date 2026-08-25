@@ -118,11 +118,18 @@ Re-sends are byte-identical. Server-side dedup is defense-in-depth.
 {
   "resource": {
     "attributes": [
-      { "key": "codeburn.device_id", "value": { "stringValue": "<SHA-256(hostname+username)[:16]>" } }
+      { "key": "codeburn.device_id", "value": { "stringValue": "<SHA-256(hostname+username)[:16]>" } },
+      { "key": "codeburn.coverage_through", "value": { "stringValue": "2026-08-24" } }
     ]
   }
 }
 ```
+
+`codeburn.coverage_through` is optional. It is the ISO date the local corpus is
+complete through, taken from the daily-cache watermark, and is stamped only
+when a complete local parse finalized that watermark (`complete` and
+`watermarkTrusted` both set). Receivers should treat its absence as "coverage
+unknown", never as "no history".
 
 ### Span attributes
 
@@ -137,10 +144,44 @@ Re-sends are byte-identical. Server-side dedup is defense-in-depth.
     { "key": "ai.project", "value": { "stringValue": "my-app" } },
     { "key": "ai.tools", "value": { "arrayValue": { "values": [{ "stringValue": "Edit" }] } } },
     { "key": "ai.speed", "value": { "stringValue": "standard" } },
-    { "key": "ai.cost_estimated", "value": { "boolValue": true } }
+    { "key": "ai.cost_estimated", "value": { "boolValue": true } },
+    { "key": "ai.work_unit_id", "value": { "stringValue": "ff1b1358ef64c52f80e50e7ae47ca176" } },
+    { "key": "ai.session_role", "value": { "stringValue": "child" } },
+    { "key": "ai.lineage_evidence", "value": { "stringValue": "provider-recorded" } },
+    { "key": "ai.cache_read_tokens", "value": { "intValue": "800" } },
+    { "key": "ai.cache_write_tokens", "value": { "intValue": "200" } },
+    { "key": "ai.call_count", "value": { "intValue": "3" } },
+    { "key": "ai.session_duration_ms", "value": { "intValue": "61000" } },
+    { "key": "ai.subscription_covered", "value": { "boolValue": true } }
   ]
 }
 ```
+
+Every attribute from `ai.work_unit_id` down is optional and sent only when its
+value is proven; an old receiver ignoring unknown attributes loses nothing:
+
+- `ai.work_unit_id`, `ai.session_role`, `ai.lineage_evidence` are emitted
+  together or not at all, and only for sessions whose provider durably
+  recorded lineage (#1140). `ai.work_unit_id` is `deriveTraceId` of the root
+  session id resolved by the #1145 work-unit resolver: the exact trace-id
+  derivation above, so a unit's identity matches the root trace already on the
+  wire. Lineage is never inferred: a session without recorded lineage carries
+  none of the three, and a child whose parent is out of range (or whose link
+  is ambiguous or cyclic) fails closed and carries none either.
+- `ai.cache_read_tokens` / `ai.cache_write_tokens` are the provider-recorded
+  cache token counts, billable-consistent with `ai.input_tokens` (cache read
+  takes the display layer's `max(cacheReadInputTokens, cachedInputTokens)`
+  convention across the Anthropic and OpenAI vocabularies). Each is sent only
+  when non-zero.
+- `ai.call_count` is the number of usage spans the span's session contributes
+  in the synced window. `ai.session_duration_ms` is the last-minus-first
+  provider-recorded event time of that session, omitted when either timestamp
+  is missing or out of order.
+- `ai.subscription_covered` is the plan/proxy-path machinery's decision: true
+  when a configured plan covers the call's provider or the session's
+  provider-recorded cwd sits under a configured proxy path, false when both
+  are ruled out, and omitted when the machinery cannot decide (no plan match
+  and no cwd to check).
 
 `ai.project` is optional. Usage spans include it only when CodeBurn can derive
 one safe basename from a provider-recorded absolute working directory.
