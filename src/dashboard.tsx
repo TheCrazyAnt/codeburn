@@ -1754,7 +1754,7 @@ export function InteractiveDashboard({ initialProjects, initialDailyHistoryProje
   }, [switchDay])
 
   useInput((input, key) => {
-    if (input === 'q') { exit(); return }
+    if (input === 'q' || (key.ctrl && input === 'c')) { exit(); return }
     if (input === 'o' && view === 'dashboard' && optimizeAvailable) { void loadOptimizeResult(); return }
     if ((input === 'b' || key.escape) && view === 'optimize') { setView('dashboard'); setFindingsCursor(0); return }
     if (view === 'optimize') {

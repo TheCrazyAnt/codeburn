@@ -1143,6 +1143,13 @@ type ProviderPlan = {
   refs: Record<string, ShardRef>
 }
 
+// Surrender the event loop without microtask overhead. Used inside saveCache
+// between shard writes so an interactive TTY's stdin handler (Ink's useInput)
+// can run while a long save publishes a 21k-file cache (#1141).
+function yieldToEventLoop(): Promise<void> {
+  return new Promise(resolve => setImmediate(resolve))
+}
+
 export async function saveCache(cache: SessionCache, verifyStillOwner?: () => Promise<boolean>): Promise<boolean> {
   const dir = sessionCacheDir()
   if (!existsSync(dir)) await mkdir(dir, { recursive: true, mode: 0o700 })
@@ -1224,6 +1231,13 @@ export async function saveCache(cache: SessionCache, verifyStillOwner?: () => Pr
         // the read happens against the CURRENT shard, not a stale name.
         if (loaded && !loaded.has(bucket) && prior) { plan.deferred.push(bucket); continue }
         plan.refs[bucket] = await writeShard(provider, bucket, files)
+        // Surrender the event loop between shard writes so an interactive
+        // TTY's stdin handler (Ink's useInput) can run while a long save
+        // publishes a 21k-file cache. The yield is BETWEEN shards - never
+        // inside one - so the temp+rename atomicity of writeFileAtomic is
+        // preserved and the in-process `written` set still tracks every
+        // file this save owns for the lost-fence cleanup below (#1141).
+        await yieldToEventLoop()
       }
     }
 

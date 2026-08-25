@@ -3543,7 +3543,7 @@ describe.skipIf(!isSqliteAvailable())('(sc) month-sharded cache integration for 
     // up the deferred row, and report complete.
     await chmod(dbPath, 0o644)
     setParseReuseValidator(() => 'clean')
-    vi.useFakeTimers({ now: Date.now() })
+    vi.useFakeTimers({ now: Date.now(), toFake: ['Date'] })
     vi.setSystemTime(Date.now() + 4 * 60 * 1000)
     try {
       const retried = await parseAllSessions(undefined, 'copilot')
