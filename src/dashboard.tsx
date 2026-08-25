@@ -1522,6 +1522,12 @@ export function InteractiveDashboard({ initialProjects, initialDailyHistoryProje
   const indexPendingFiles = initialIndexPendingFiles ?? 0
   const [indexing, setIndexing] = useState(indexPendingFiles > 0)
   const [indexedFiles, setIndexedFiles] = useState(0)
+  // #1143: first q during the cold-start fill arms a confirmation so the user
+  // sees feedback instead of a silent ~16.5s drain. The second q (or any
+  // Ctrl+C) takes the abrupt path; #1109 already made abrupt exit kill-safe.
+  // Auto-clears the moment the fill lands so a stale flag can never trap a
+  // later q.
+  const [quitArmed, setQuitArmed] = useState(false)
   const isDayMode = dayDate != null
   const isCustomRange = customRange != null && !isDayMode
   const scrollableDailyHistory = !isCustomRange && !isDayMode
@@ -1708,6 +1714,10 @@ export function InteractiveDashboard({ initialProjects, initialDailyHistoryProje
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  useEffect(() => {
+    if (!indexing && quitArmed) setQuitArmed(false)
+  }, [indexing, quitArmed])
+
   const switchPeriod = useCallback((np: Period) => {
     if (np === period && !dayDate) return
     // Clear projects + flip loading synchronously so the dashboard never
@@ -1754,7 +1764,22 @@ export function InteractiveDashboard({ initialProjects, initialDailyHistoryProje
   }, [switchDay])
 
   useInput((input, key) => {
-    if (input === 'q' || (key.ctrl && input === 'c')) { exit(); return }
+    // #1143: Ctrl+C always exits immediately, regardless of fill state. The
+    // #1109 abrupt path is kill-safe (nothing marked seen without being
+    // parsed, resume converges), so this is the unconditional escape hatch.
+    if (key.ctrl && input === 'c') { exit(); return }
+    // First q during an active fill: arm confirmation, do not exit. The fill
+    // keeps running so the next launch starts warm. A second q takes the
+    // abrupt path; q with no fill active exits immediately (no flicker).
+    if (input === 'q') {
+      if (indexing) {
+        if (quitArmed) { exit(); return }
+        setQuitArmed(true)
+        return
+      }
+      exit()
+      return
+    }
     if (input === 'o' && view === 'dashboard' && optimizeAvailable) { void loadOptimizeResult(); return }
     if ((input === 'b' || key.escape) && view === 'optimize') { setView('dashboard'); setFindingsCursor(0); return }
     if (view === 'optimize') {
@@ -1846,6 +1871,7 @@ export function InteractiveDashboard({ initialProjects, initialDailyHistoryProje
           : view === 'optimize'
             ? <Panel title="CodeBurn Optimize" color={ORANGE} width={dashWidth}><Text dimColor>Scanning {headerLabel}...</Text></Panel>
             : <Panel title="CodeBurn" color={ORANGE} width={dashWidth}><Text dimColor>Loading {headerLabel}...</Text></Panel>}
+        {quitArmed && indexing && <QuitConfirmationBanner width={dashWidth} />}
         {view !== 'compare' && <StatusBar width={dashWidth} showProvider={multipleProviders} view={view} findingCount={0} optimizeAvailable={false} compareAvailable={false} customRange={isCustomRange} dayMode={isDayMode} />}
       </Box>
     )
@@ -1865,6 +1891,7 @@ export function InteractiveDashboard({ initialProjects, initialDailyHistoryProje
             <Text wrap="truncate-end"><Text color={ORANGE} bold>tip </Text><Text dimColor>{coachingNote}</Text></Text>
           </Box>
         )}
+        {quitArmed && indexing && <QuitConfirmationBanner width={dashWidth} />}
         {view !== 'compare' && <StatusBar width={dashWidth} showProvider={multipleProviders} view={view} findingCount={findingCount} optimizeAvailable={optimizeAvailable} compareAvailable={compareAvailable} customRange={isCustomRange} dayMode={isDayMode} />}
       </Box>
     )
@@ -1889,6 +1916,24 @@ function IndexingBanner({ width, done, total }: { width: number; done: number; t
       <Text wrap="truncate-end">
         <Text color={ORANGE} bold>indexing </Text>
         <Text dimColor>history · {Math.min(done, total)}/{total} files · totals below cover what is indexed so far</Text>
+      </Text>
+    </Box>
+  )
+}
+
+// #1143: shown after the first q during the cold-start fill. The user sees
+// feedback instead of a silent ~16.5s drain; a second q (or any Ctrl+C) takes
+// the abrupt path. Footer styling matches StatusBar (DIM border, ORANGE
+// accent on the action key) so it reads as part of the chrome, not a toast.
+function QuitConfirmationBanner({ width }: { width: number }) {
+  return (
+    <Box borderStyle="round" borderColor={DIM} width={width} justifyContent="center" paddingX={1}>
+      <Text wrap="truncate-end">
+        <Text dimColor>Finishing background index so the next launch starts warm - press </Text>
+        <Text color={ORANGE} bold>q</Text>
+        <Text dimColor> or </Text>
+        <Text color={ORANGE} bold>Ctrl+C</Text>
+        <Text dimColor> again to quit now</Text>
       </Text>
     </Box>
   )

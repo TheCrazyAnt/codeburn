@@ -2,9 +2,33 @@ import { PassThrough } from 'node:stream'
 
 import React from 'react'
 import { render } from 'ink'
-import { afterEach, describe, expect, it, onTestFinished } from 'vitest'
+import stripAnsi from 'strip-ansi'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
 
 import { InteractiveDashboard } from '../src/dashboard.js'
+
+// #1143: the quit-confirmation path runs only while a cold-start fill is
+// active, so the parser mock below holds the fill in flight (parseAllSessions
+// never resolves) for the duration of those tests. `filesParsedFromSourceCount`
+// stays at zero so the progress interval can't grow `indexedFiles` under the
+// test. The other exports are kept stable so the rest of the dashboard
+// (provider detection, the budget effect, the q-without-fill handler) still
+// works with the mock in place - the existing #1141 tests rely on that.
+const { parseAllSessionsMock, filesParsedFromSourceCountMock } = vi.hoisted(() => ({
+  parseAllSessionsMock: vi.fn<Parameters<typeof import('../src/parser.js').parseAllSessions>, ReturnType<typeof import('../src/parser.js').parseAllSessions>>(
+    () => new Promise(() => {}),
+  ),
+  filesParsedFromSourceCountMock: vi.fn(() => 0),
+}))
+
+vi.mock('../src/parser.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/parser.js')>()
+  return {
+    ...actual,
+    parseAllSessions: parseAllSessionsMock,
+    filesParsedFromSourceCount: filesParsedFromSourceCountMock,
+  }
+})
 
 const EMPTY_CATEGORY_BREAKDOWN = {
   coding: { turns: 0, costUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
@@ -69,23 +93,20 @@ function makeTui() {
   return { stdin, stdout }
 }
 
-async function mountDashboard(stdin: PassThrough & NodeJS.ReadStream, stdout: PassThrough & NodeJS.WriteStream) {
+async function mountDashboard(stdin: PassThrough & NodeJS.ReadStream, stdout: PassThrough & NodeJS.WriteStream, options?: { indexPendingFiles?: number }) {
   const app = render(React.createElement(InteractiveDashboard, {
     initialProjects: [makeProject('proj', [makeSession('s1')])],
     initialPeriod: 'today',
     initialProvider: 'all',
     refreshSeconds: 0,
     windowColumns: 120,
+    ...(options?.indexPendingFiles ? { initialIndexPendingFiles: options.indexPendingFiles } : {}),
   }), { stdin, stdout, debug: true, interactive: true, patchConsole: false })
   await app.waitUntilRenderFlush()
   return app
 }
 
 describe('InteractiveDashboard exit keystrokes (#1141)', () => {
-  afterEach(() => {
-    // The unmount in onTestFinished handles cleanup; nothing to do here.
-  })
-
   it('exits on a bare q keystroke', async () => {
     const { stdin, stdout } = makeTui()
     const app = await mountDashboard(stdin, stdout)
@@ -107,5 +128,74 @@ describe('InteractiveDashboard exit keystrokes (#1141)', () => {
     // parser surfaces it as { input: 'c', key: { ctrl: true } }.
     stdin.write('\x03')
     await expect(exited).resolves.toBeUndefined()
+  })
+})
+
+describe('InteractiveDashboard quit feedback during the cold-start fill (#1143)', () => {
+  const QUIT_STATUS = 'Finishing background index so the next launch starts warm - press q or Ctrl+C again to quit now'
+
+  it('first q during an active fill does not exit and renders a status line', async () => {
+    const { stdin, stdout } = makeTui()
+    const chunks: string[] = []
+    stdout.on('data', chunk => chunks.push(stripAnsi(String(chunk))))
+    // non-zero deferred files -> `indexing` initializes to true, and the
+    // parser mock above holds the fill in flight so the state cannot
+    // resolve out from under the test.
+    const app = await mountDashboard(stdin, stdout, { indexPendingFiles: 100 })
+    onTestFinished(() => app.unmount())
+
+    stdin.write('q')
+    await app.waitUntilRenderFlush()
+
+    const frame = chunks.join('')
+    expect(frame).toContain(QUIT_STATUS)
+    // Not yet exited: the test would hang forever on waitUntilExit() if it
+    // had, so just make sure the app is still mounted by sending a no-op
+    // keystroke and seeing it land without throwing.
+    stdin.write('j')
+    await app.waitUntilRenderFlush()
+  })
+
+  it('a second q during the drain exits through the same abrupt path', async () => {
+    const { stdin, stdout } = makeTui()
+    const app = await mountDashboard(stdin, stdout, { indexPendingFiles: 100 })
+    onTestFinished(() => app.unmount())
+
+    stdin.write('q')
+    await app.waitUntilRenderFlush()
+
+    const exited = app.waitUntilExit()
+    stdin.write('q')
+    await expect(exited).resolves.toBeUndefined()
+  })
+
+  it('Ctrl+C during the drain exits immediately, bypassing the confirmation', async () => {
+    const { stdin, stdout } = makeTui()
+    const app = await mountDashboard(stdin, stdout, { indexPendingFiles: 100 })
+    onTestFinished(() => app.unmount())
+
+    stdin.write('q')
+    await app.waitUntilRenderFlush()
+    // Second keystroke is the abrupt path. A raw 0x03 must work whether or
+    // not the first q armed the confirmation, matching the #1109 kill-safe
+    // exit.
+    const exited = app.waitUntilExit()
+    stdin.write('\x03')
+    await expect(exited).resolves.toBeUndefined()
+  })
+
+  it('q with no fill active exits immediately and never renders the status line', async () => {
+    const { stdin, stdout } = makeTui()
+    const chunks: string[] = []
+    stdout.on('data', chunk => chunks.push(stripAnsi(String(chunk))))
+    const app = await mountDashboard(stdin, stdout)
+    onTestFinished(() => app.unmount())
+
+    const exited = app.waitUntilExit()
+    stdin.write('q')
+    await expect(exited).resolves.toBeUndefined()
+    // Belt-and-braces: nothing in the rendered history should mention the
+    // "Finishing background index" line - no flicker on the no-fill path.
+    expect(chunks.join('')).not.toContain(QUIT_STATUS)
   })
 })
