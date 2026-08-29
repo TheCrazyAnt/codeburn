@@ -494,4 +494,38 @@ struct CapacityDockPlacementTests {
             preferredEdge: .left
         ) == .right)
     }
+
+    @Test("provider row hit test resolves bands, gaps, and both anchors")
+    func providerRowHitTest() {
+        func index(_ offset: CGFloat, anchor: CapacityDockExpansionAnchor = .start) -> Int? {
+            CapacityDockPlacement.providerRowIndex(
+                alongOffset: offset,
+                rowHeight: 84,
+                rowSpacing: 12,
+                rowCount: 3,
+                expansionAnchor: anchor
+            )
+        }
+
+        #expect(index(0) == 0)
+        #expect(index(84) == 0)
+        #expect(index(90) == nil)
+        #expect(index(96) == 1)
+        #expect(index(240) == 2)
+        #expect(index(276) == 2)
+        #expect(index(277) == nil)
+        #expect(index(-1) == nil)
+
+        #expect(index(0, anchor: .end) == 2)
+        #expect(index(96, anchor: .end) == 1)
+        #expect(index(240, anchor: .end) == 0)
+
+        #expect(CapacityDockPlacement.providerRowIndex(
+            alongOffset: 10,
+            rowHeight: 84,
+            rowSpacing: 12,
+            rowCount: 0,
+            expansionAnchor: .start
+        ) == nil)
+    }
 }

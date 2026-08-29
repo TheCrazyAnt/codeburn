@@ -176,8 +176,6 @@ final class CapacityDockViewModel {
 struct CapacityDockView: View {
     let model: CapacityDockViewModel
     let quota: (CapacityDockProvider) -> QuotaSummary?
-    let onRailHover: (Bool) -> Void
-    let onProviderHover: (CapacityDockProvider, Bool) -> Void
     let onProviderClick: (CapacityDockProvider) -> Void
     let onHide: () -> Void
     let onDock: (CapacityDockEdge) -> Void
@@ -202,7 +200,6 @@ struct CapacityDockView: View {
                     quota: quota(provider),
                     scale: model.scale,
                     gaugeShape: model.preferences.gaugeShape,
-                    onHover: { onProviderHover(provider, $0) },
                     onClick: { onProviderClick(provider) }
                 )
                 .frame(
@@ -260,7 +257,6 @@ struct CapacityDockView: View {
         }
         .clipShape(railShape)
         .contentShape(railShape)
-        .onHover(perform: onRailHover)
         .contextMenu {
             Menu("Dock to Edge") {
                 Button("Left") { onDock(.left) }
@@ -301,7 +297,6 @@ private struct CapacityDockProviderRow: View {
     let quota: QuotaSummary?
     let scale: CGFloat
     let gaugeShape: CapacityDockGaugeShape
-    let onHover: (Bool) -> Void
     let onClick: () -> Void
 
     private var headline: QuotaSummary.Window? { quota?.headlineWindow }
@@ -359,7 +354,6 @@ private struct CapacityDockProviderRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .onHover(perform: onHover)
         .accessibilityLabel("\(provider.displayName) usage")
         .accessibilityValue(headline?.percentLabel ?? "Unknown")
         .accessibilityHint("Click to keep Capacity Dock expanded")
@@ -481,7 +475,6 @@ enum CapacityDockQuotaPresentation {
 struct CapacityDockDetailView: View {
     let model: CapacityDockViewModel
     let quota: (CapacityDockProvider) -> QuotaSummary?
-    let onHover: (Bool) -> Void
     let onConnect: (CapacityDockProvider) -> Void
 
     var body: some View {
@@ -508,7 +501,6 @@ struct CapacityDockDetailView: View {
             }
         }
         .contentShape(bubbleShape)
-        .onHover(perform: onHover)
         .accessibilityElement(children: .contain)
     }
 

@@ -20,6 +20,8 @@ final class CapacityDockController {
     private var detailWork: DispatchWorkItem?
     private var detailExitWork: DispatchWorkItem?
     private var pointerInsideRail = false
+    private var pointerInsideDetail = false
+    private var hoveredRowProvider: CapacityDockProvider?
     private var dragStartFrame: CGRect?
     private var dragVisibleFrame: CGRect?
     private var dragScreenFrame: CGRect?
@@ -114,6 +116,9 @@ final class CapacityDockController {
             self.accessibilityObserver = nil
         }
         stopEventMonitoring()
+        pointerInsideRail = false
+        pointerInsideDetail = false
+        hoveredRowProvider = nil
 
         detailPanel?.orderOut(nil)
         railPanel?.orderOut(nil)
@@ -161,6 +166,9 @@ final class CapacityDockController {
 
         guard snapshot.isEnabled else {
             stopEventMonitoring()
+            pointerInsideRail = false
+            pointerInsideDetail = false
+            hoveredRowProvider = nil
             model.interaction.dismiss()
             hideDetail(animated: false)
             stopRailMotion()
@@ -184,12 +192,6 @@ final class CapacityDockController {
             model: model,
             quota: { [weak self] provider in
                 self?.store.capacityDockQuotaSummary(for: provider)
-            },
-            onRailHover: { [weak self] hovering in
-                self?.railHoverChanged(hovering)
-            },
-            onProviderHover: { [weak self] provider, hovering in
-                self?.providerHoverChanged(provider, hovering: hovering)
             },
             onProviderClick: { [weak self] provider in
                 self?.providerClicked(provider)
@@ -242,9 +244,6 @@ final class CapacityDockController {
             quota: { [weak self] provider in
                 self?.store.capacityDockQuotaSummary(for: provider)
             },
-            onHover: { [weak self] hovering in
-                self?.detailHoverChanged(hovering)
-            },
             onConnect: { [weak self] provider in
                 self?.connect(provider)
             }
@@ -277,7 +276,9 @@ final class CapacityDockController {
         ) { [weak self] event in
             guard let self else { return event }
             if event.type == .mouseMoved {
-                self.updateMouseEventPassthrough(at: NSEvent.mouseLocation)
+                let point = NSEvent.mouseLocation
+                self.updateMouseEventPassthrough(at: point)
+                self.syncPointerHover(at: point)
             } else if event.type == .keyDown, event.keyCode == 53 {
                 if self.model.interaction.handleEscape() {
                     self.hideDetail(animated: false)
@@ -295,7 +296,9 @@ final class CapacityDockController {
                 guard let self else { return }
                 let point = NSEvent.mouseLocation
                 self.updateMouseEventPassthrough(at: point)
-                if event.type != .mouseMoved {
+                if event.type == .mouseMoved {
+                    self.syncPointerHover(at: point)
+                } else {
                     self.dismissIfOutside(point: point)
                 }
             }
@@ -342,6 +345,57 @@ final class CapacityDockController {
         }
     }
 
+    /// SwiftUI's onHover rides on NSTrackingAreas that only deliver while the
+    /// app is active. An accessory app behind a nonactivating panel loses
+    /// activation on the first outside click and can never win it back, so
+    /// hover enter/exit is synthesized here from the event monitors, which
+    /// observe the pointer regardless of activation.
+    private func syncPointerHover(at point: CGPoint = NSEvent.mouseLocation) {
+        guard model.preferences.isEnabled,
+              model.interaction.acceptsHoverTransitions,
+              railPanel != nil else { return }
+        let insideRail = railContains(screenPoint: point)
+        let insideDetail = detailPanel?.isVisible == true && detailContains(screenPoint: point)
+        let row = insideRail ? providerRow(at: point) : nil
+
+        if insideDetail != pointerInsideDetail {
+            pointerInsideDetail = insideDetail
+            detailHoverChanged(insideDetail)
+        }
+        if insideRail != pointerInsideRail {
+            railHoverChanged(insideRail)
+        }
+        if row != hoveredRowProvider {
+            let previous = hoveredRowProvider
+            hoveredRowProvider = row
+            if let previous { providerHoverChanged(previous, hovering: false) }
+            if let row { providerHoverChanged(row, hovering: true) }
+        }
+    }
+
+    private func providerRow(at screenPoint: CGPoint) -> CapacityDockProvider? {
+        guard let railPanel else { return nil }
+        let frame = railPanel.frame
+        let alongOffset: CGFloat = if model.isVertical {
+            model.expansionAnchor == .start
+                ? frame.maxY - model.railTopPadding - screenPoint.y
+                : screenPoint.y - frame.minY - model.railBottomPadding
+        } else {
+            model.expansionAnchor == .start
+                ? screenPoint.x - frame.minX - model.railTopPadding
+                : frame.maxX - model.railBottomPadding - screenPoint.x
+        }
+        let providers = model.displayedProviders
+        guard let index = CapacityDockPlacement.providerRowIndex(
+            alongOffset: alongOffset,
+            rowHeight: model.rowHeight,
+            rowSpacing: model.rowSpacing,
+            rowCount: providers.count,
+            expansionAnchor: model.expansionAnchor
+        ) else { return nil }
+        return providers[index]
+    }
+
     private func railHoverChanged(_ hovering: Bool) {
         pointerInsideRail = hovering
         guard model.interaction.acceptsHoverTransitions else { return }
@@ -369,9 +423,12 @@ final class CapacityDockController {
         guard model.interaction.acceptsHoverTransitions else { return }
         detailWork?.cancel()
         detailExitWork?.cancel()
-        collapseWork?.cancel()
 
         if hovering {
+            // Re-entering a row aborts a pending collapse; a row exit must NOT
+            // touch collapseWork, or it clobbers the collapse the rail exit
+            // just scheduled and strands the rail expanded.
+            collapseWork?.cancel()
             let work = DispatchWorkItem { [weak self] in
                 guard let self else { return }
                 self.showDetail(for: provider)
@@ -534,6 +591,8 @@ final class CapacityDockController {
             model.interaction.beginDragging()
             railPanel.ignoresMouseEvents = false
             hideDetail(animated: false)
+            hoveredRowProvider = nil
+            pointerInsideDetail = false
             dragStartFrame = railPanel.frame
             dragVisibleFrame = screen.visibleFrame
             dragScreenFrame = screen.frame
@@ -733,6 +792,9 @@ final class CapacityDockController {
             model.interaction.beginRailExitGrace()
             scheduleCollapse()
         }
+        // The drag cleared the row cache; a pointer resting on a row at drop
+        // gets no further mouseMoved event, so re-derive the row hover here.
+        syncPointerHover()
     }
 
     private func layoutRail(preserveCurrentTop: Bool = true, animate: Bool = true) {
@@ -823,6 +885,9 @@ final class CapacityDockController {
         if !detailIsDismissing, let provider = model.hoveredProvider {
             layoutDetail(for: provider)
         }
+        // A stationary pointer gets no mouseMoved event when the rail resizes
+        // or moves beneath it; re-derive hover from the settled geometry.
+        syncPointerHover()
     }
 
     private func layoutDetail(
@@ -1003,6 +1068,7 @@ final class CapacityDockController {
                 if !self.detailIsDismissing, let provider = self.model.hoveredProvider {
                     self.layoutDetail(for: provider, transaction: .detailFollow)
                 }
+                self.syncPointerHover()
             }
         )
         railMotion?.start()
@@ -1048,6 +1114,7 @@ final class CapacityDockController {
                     self.detailPanel?.alphaValue = 1
                 }
                 self.updateMouseEventPassthrough()
+                self.syncPointerHover()
             }
         )
         detailMotion?.start()

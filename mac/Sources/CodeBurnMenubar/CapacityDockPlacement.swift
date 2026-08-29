@@ -303,6 +303,25 @@ enum CapacityDockPlacement {
         )
     }
 
+    /// Inverse of the controller's row-midpoint layout: which provider row band
+    /// contains a pointer, given its along-axis distance from the anchor-side
+    /// content start (padding already subtracted). Returns nil in the spacing
+    /// gaps and outside the row run.
+    static func providerRowIndex(
+        alongOffset: CGFloat,
+        rowHeight: CGFloat,
+        rowSpacing: CGFloat,
+        rowCount: Int,
+        expansionAnchor: CapacityDockExpansionAnchor
+    ) -> Int? {
+        guard rowCount > 0, rowHeight > 0, alongOffset >= 0 else { return nil }
+        let period = rowHeight + rowSpacing
+        let slot = Int(alongOffset / period)
+        guard slot < rowCount,
+              alongOffset - CGFloat(slot) * period <= rowHeight else { return nil }
+        return expansionAnchor == .start ? slot : rowCount - 1 - slot
+    }
+
     static func preferredDetailSide(
         railFrame: CGRect,
         visibleFrame: CGRect,
