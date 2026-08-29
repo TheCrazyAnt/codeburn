@@ -5,6 +5,7 @@ import { join } from 'path'
 
 import { getCodeburnCacheDir } from './cache-dir.js'
 import { acquireCacheRefreshLock, releaseOwnedRefreshLocksForExit } from './cache-refresh-lock.js'
+import { isTurnDerivation, type TurnDerivation } from './aggregate-deltas.js'
 import type { ToolCall } from './types.js'
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -91,6 +92,12 @@ export type CachedTurn = {
   // A spawned sidechain session is folded into the launching turn by matching its
   // resolved spawn id against these. Stored per-turn directly. Optional.
   spawnToolUseIds?: string[]
+  // What classifying this turn produced last time (category / sub-category /
+  // retries / edits). A pure function of the fields above, so it is reused
+  // while they are unchanged instead of being re-decided on every read — see
+  // aggregate-deltas.ts. Absent on a turn that has never been classified, and
+  // dropped whenever the call set changes (`withCalls`).
+  derived?: TurnDerivation
 }
 
 export type FileFingerprint = {
@@ -103,6 +110,17 @@ export type FileFingerprint = {
 export type CachedFile = {
   fingerprint: FileFingerprint
   lastCompleteLineOffset?: number
+  // sha-256 of the bytes ending at `lastCompleteLineOffset` (the last
+  // PREFIX_TAIL_BYTES of the region already in `turns`). An append is resumed
+  // from that offset on the word of the fingerprint alone, which cannot see a
+  // rewrite that also grew the file; this is what that word is checked
+  // against. Absent on entries written before the check existed.
+  prefixTailSha?: string
+  // Checksum of this file's cached turn derivations (aggregate-deltas.ts),
+  // written when every turn carries one. The parity gate re-derives the file
+  // and checks it against this; a mismatch means nothing derived can be
+  // trusted. Absent when the derivations are partial.
+  derivedDigest?: string
   canonicalCwd?: string
   // Original cwd before linked-worktree canonicalization.
   workingDirectory?: string
@@ -446,6 +464,8 @@ function monthKey(timestamp: string | undefined): string | null {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`
 }
 
+const spanMemo = new WeakMap<CachedTurn[], { bucket: string; until: string }>()
+
 /** The UTC month span a cached file covers: `bucket` is its OLDEST turn's month
  *  (the shard it lives in), `until` its NEWEST (how far forward the shard can
  *  contribute). Both scan every turn rather than reading turns[0]/turns[-1]:
@@ -453,6 +473,15 @@ function monthKey(timestamp: string | undefined): string | null {
  *  ROWID, goose/crush/copilot by a DESC ordering), and a `until < bucket` span
  *  is empty, which makes the shard unreachable at EVERY scope. */
 export function cacheFileSpan(file: CachedFile): { bucket: string; until: string } {
+  // Memoised on the turns ARRAY, not on the file: a save reads every entry's
+  // span three times (bucketFiles, untilMonth, the bucketOf rebuild), so an
+  // unchanged corpus was re-scanning its whole history — Date.parse per turn —
+  // three times per run to re-derive months that cannot have moved. A cached
+  // entry whose turns change is always given a NEW array (parse installs a new
+  // entry; the durable merge and the append merge both assign a fresh one), so
+  // an array that is still the same array still has the same timestamps.
+  const memo = spanMemo.get(file.turns)
+  if (memo) return memo
   let bucket: string | null = null
   let until: string | null = null
   for (const turn of file.turns) {
@@ -461,7 +490,39 @@ export function cacheFileSpan(file: CachedFile): { bucket: string; until: string
     if (bucket === null || month < bucket) bucket = month
     if (until === null || month > until) until = month
   }
-  return bucket === null ? { bucket: UNDATED_BUCKET, until: UNDATED_BUCKET } : { bucket, until: until! }
+  const span = bucket === null ? { bucket: UNDATED_BUCKET, until: UNDATED_BUCKET } : { bucket, until: until! }
+  spanMemo.set(file.turns, span)
+  return span
+}
+
+// How much of the already-parsed region an append is checked against. A full
+// prefix hash would mean re-reading the whole file, which is the cost the
+// append shortcut exists to avoid; the tail is where a rewrite-then-grow (log
+// rotation, an editor rewriting in place) shows up.
+// ponytail: tail-only. A rewrite confined to the middle of the prefix that
+// leaves size and mtime plausible still reads as an append — as it does today
+// with no check at all. Hash more of the prefix if that case ever shows up.
+const PREFIX_TAIL_BYTES = 4096
+
+/** sha-256 of the bytes ending at `offset`, for {@link CachedFile.prefixTailSha}.
+ *  `null` when the file cannot be read that far — an unverifiable claim, which
+ *  the caller treats as a changed file rather than an appended one. */
+export async function prefixTailSha(filePath: string, offset: number): Promise<string | null> {
+  if (offset <= 0) return null
+  const length = Math.min(PREFIX_TAIL_BYTES, offset)
+  try {
+    const handle = await open(filePath, 'r')
+    try {
+      const buffer = Buffer.allocUnsafe(length)
+      const { bytesRead } = await handle.read(buffer, 0, length, offset - length)
+      if (bytesRead !== length) return null
+      return createHash('sha256').update(buffer).digest('hex').slice(0, 32)
+    } finally {
+      await handle.close()
+    }
+  } catch {
+    return null
+  }
 }
 
 /** The shard bucket a cached file belongs to. Derived from the file's own turns,
@@ -688,6 +749,7 @@ function validateTurn(t: unknown): t is CachedTurn {
     && isOptionalString(o['gitBranch'])
     && (o['prRefs'] === undefined || isStringArray(o['prRefs']))
     && (o['spawnToolUseIds'] === undefined || isStringArray(o['spawnToolUseIds']))
+    && (o['derived'] === undefined || isTurnDerivation(o['derived']))
     && Array.isArray(o['calls'])
     && (o['calls'] as unknown[]).every(validateCall)
 }
@@ -697,6 +759,8 @@ function validateCachedFile(f: unknown): f is CachedFile {
   const o = f as Record<string, unknown>
   return validateFingerprint(o['fingerprint'])
     && isOptionalNum(o['lastCompleteLineOffset'])
+    && isOptionalString(o['prefixTailSha'])
+    && isOptionalString(o['derivedDigest'])
     && isOptionalString(o['canonicalCwd'])
     && isOptionalString(o['workingDirectory'])
     && isOptionalString(o['canonicalProjectName'])

@@ -690,19 +690,28 @@ export function resolveSubagentAttribution(projects: ProjectSummary[]): Subagent
   // cannot tell which record spawned it. Such a key folds into NEITHER parent and
   // its subtree is skipped (correctness over coverage). Identical duplicates share
   // a fingerprint, so they are not ambiguous and fold once.
-  const fpByKey = new Map<string, Set<string>>()
+  // Grouped before it is fingerprinted: a fingerprint walks the session's whole
+  // turn list, and a key only ONE record carries cannot be ambiguous whatever
+  // that record hashes to. Fingerprinting every session up front meant hashing
+  // all of history on every run — cost set by the size of the corpus rather
+  // than by the (rare) collisions this is looking for.
+  const recordsByKey = new Map<string, SessionSummary[]>()
   const note = (s: SessionSummary): void => {
     const k = providerSessionKey(s)
-    const set = fpByKey.get(k)
-    if (set) set.add(sessionFingerprint(s))
-    else fpByKey.set(k, new Set([sessionFingerprint(s)]))
+    const records = recordsByKey.get(k)
+    if (records) records.push(s)
+    else recordsByKey.set(k, [s])
   }
   for (const project of projects) {
     for (const s of project.sessions) note(s)
     for (const a of project.subagentAnchors ?? []) note(a)
   }
   const ambiguous = new Set<string>()
-  for (const [k, fps] of fpByKey) if (fps.size > 1) ambiguous.add(k)
+  for (const [k, records] of recordsByKey) {
+    if (records.length < 2) continue
+    const fingerprints = new Set(records.map(sessionFingerprint))
+    if (fingerprints.size > 1) ambiguous.add(k)
+  }
 
   const out: SubagentAttribution = new Map()
   const resolveParent = (parent: SessionSummary): void => {

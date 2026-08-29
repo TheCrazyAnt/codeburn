@@ -36,9 +36,17 @@ import {
   markCacheDirty,
   monthScopeForRange,
   reconcileFile,
+  prefixTailSha,
   saveCache,
   sourcePathStatCandidates,
 } from './session-cache.js'
+import {
+  applyDerivation,
+  auditDerivedParity,
+  derivationOf,
+  digestOfCachedFile,
+  withCalls,
+} from './aggregate-deltas.js'
 import { acquireCacheRefreshLock, type RefreshLockHandle, type RefreshLockOutcome } from './cache-refresh-lock.js'
 import { decideParseWorkers, parseFilesInOrder, ParseWorkerPool, type ClaudeWorkerParse, type ParseJob } from './parse-workers.js'
 import type { CodexFullParse } from './providers/codex.js'
@@ -2012,7 +2020,11 @@ async function scanProjectDirs(
       if (readOnly && action.action !== 'unchanged') readOnlyServedStale = true
       unchangedFiles.push({ filePath, dirName, source, cached: section.files[filePath]! })
     } else if (!readOnly) {
-      if (action.action === 'appended') {
+      // An `appended` verdict is the fingerprint's word that the bytes before
+      // the resume offset never moved — and a fingerprint cannot see a rewrite
+      // that also grew the file. Check the word against the tail hash recorded
+      // when that region was parsed; a file that fails re-parses whole.
+      if (action.action === 'appended' && await appendPrefixIntact(filePath, cached!)) {
         changedFiles.push({
           filePath,
           info: { dirName, fp, source },
@@ -2042,6 +2054,29 @@ async function scanProjectDirs(
       ?? cached.turns[0]?.calls[0]?.project
       ?? basename(dirname(filePath))
     unchangedFiles.push({ filePath, dirName, cached })
+  }
+
+  // Parity gate: one cached file is re-derived from its raw turns and checked
+  // against the digest stored with it. Everything below reuses cached
+  // derivations rather than re-deciding them, so this is the one thing that
+  // would notice them drifting from what deriving now produces — a stale
+  // classifier verdict, a half-written shard, a delta applied to the wrong
+  // turn. A mismatch is not repaired locally: nothing derived is trusted for
+  // the rest of the run and the file that failed is re-parsed from source.
+  const parityFailure = readOnly ? null : auditDerivedParity(
+    unchangedFiles.map(f => ({ path: f.filePath, file: f.cached })),
+    turn => derivationOf(classifyCachedTurnFresh(turn)),
+  )
+  if (parityFailure) {
+    process.stderr.write(
+      `codeburn: CACHED AGGREGATE PARITY FAILURE on ${parityFailure.path} `
+      + `(stored ${parityFailure.stored}, re-derived ${parityFailure.rederived}); `
+      + `re-deriving every cached turn this run and re-parsing that file\n`)
+    derivedReuseDisabled = true
+    const failedIndex = unchangedFiles.findIndex(f => f.filePath === parityFailure.path)
+    const failed = failedIndex >= 0 ? unchangedFiles.splice(failedIndex, 1)[0] : undefined
+    const fp = failed && await fingerprintFile(failed.filePath)
+    if (failed && fp) changedFiles.push({ filePath: failed.filePath, info: { dirName: failed.dirName, fp, source: failed.source } })
   }
 
   // Pre-seed dedup set from cached (unchanged) files
@@ -2093,6 +2128,7 @@ async function scanProjectDirs(
     section.files[filePath] = {
       fingerprint: info.fp,
       lastCompleteLineOffset: parsed.lastCompleteLineOffset,
+      ...(await tailShaFor(filePath, parsed.lastCompleteLineOffset)),
       canonicalCwd: canonical?.path,
       ...(trustedCwd ? { workingDirectory: trustedCwd } : {}),
       canonicalProjectName: canonical?.isWorktree ? projectNameFromPath(canonical.path, info.dirName) : undefined,
@@ -2189,8 +2225,12 @@ async function scanProjectDirs(
               // the last cached turn — merge its calls in (a full re-parse would put
               // them in that same turn), then append the remaining new turns.
               if (!newTurns[0]!.userMessage.trim() && mergedTurns.length > 0) {
-                const last = mergedTurns[mergedTurns.length - 1]!
-                last.calls = mergeBoundaryCalls(last.calls, newTurns[0]!.calls)
+                // Through withCalls: the boundary turn is the one cached turn an
+                // append can change, so it is also the one whose stored
+                // classification must not survive the merge.
+                const boundary = mergedTurns[mergedTurns.length - 1]!
+                const last = withCalls(boundary, mergeBoundaryCalls(boundary.calls, newTurns[0]!.calls))
+                mergedTurns[mergedTurns.length - 1] = last
                 // A PR referenced in the appended continuation belongs to this same
                 // turn: union its refs in so the shortcut matches a full re-parse.
                 const refs = Array.from(new Set([...(last.prRefs ?? []), ...(newTurns[0]!.prRefs ?? [])])).sort()
@@ -2249,6 +2289,7 @@ async function scanProjectDirs(
             section.files[filePath] = {
               fingerprint: info.fp,
               lastCompleteLineOffset: tracker.lastCompleteLineOffset,
+              ...(await tailShaFor(filePath, tracker.lastCompleteLineOffset)),
               canonicalCwd,
               ...(workingDirectory ? { workingDirectory } : {}),
               canonicalProjectName,
@@ -2327,6 +2368,7 @@ async function scanProjectDirs(
   for (const { filePath, dirName, source } of allFiles) {
     const cachedFile = section.files[filePath]
     if (!cachedFile || cachedFile.turns.length === 0) continue
+    const stashedBefore = derivationsStashed
 
     // Carry the git branch forward BEFORE the date filter below: the cache
     // stores a turn's branch only when it changes, so resolving here (over the
@@ -2364,6 +2406,9 @@ async function scanProjectDirs(
       const sliced = dateRange ? classifiedTurnSlicedToRange(classified, dateRange) : classified
       if (sliced) classifiedTurns.push(sliced)
     }
+    // Derivations decided above belong to the cache: recording them is what
+    // makes the NEXT run's aggregation a delta.
+    persistDerivations(diskCache, 'claude', filePath, cachedFile, stashedBefore, readOnly)
     // Captured from the FULL turn list, which the date slice above can strip of
     // the turn a branch was first seen on. Lets the by-branch report keep this
     // session's in-range unbranched spend as `null` instead of discarding it.
@@ -2699,10 +2744,13 @@ function cachedCallToApiCall(call: CachedCall): ParsedApiCall {
   // Cache-rehydration twin of the fresh-parse pricing in
   // src/providers/codex.ts (and every other provider's parser): both go
   // through billableOutputTokens so a cached read and a cold parse can never
-  // disagree about whether reasoning is already inside output (#1075).
-  const outputForCost = billableOutputTokens(call.provider, u.outputTokens, u.reasoningTokens)
-  const costUSD = calculateCost(
-    call.model, u.inputTokens, outputForCost,
+  // disagree about whether reasoning is already inside output (#1075). Reached
+  // only for a call the provider did not price itself: the result was already
+  // discarded when `call.costUSD` is set, and pricing it anyway cost a
+  // model-table lookup per cached call on every read.
+  const costUSD = call.costUSD ?? calculateCost(
+    call.model, u.inputTokens,
+    billableOutputTokens(call.provider, u.outputTokens, u.reasoningTokens),
     u.cacheCreationInputTokens, u.cacheReadInputTokens,
     u.webSearchRequests, call.speed, u.cacheCreationOneHourTokens,
   )
@@ -2718,7 +2766,7 @@ function cachedCallToApiCall(call: CachedCall): ParsedApiCall {
       reasoningTokens: u.reasoningTokens,
       webSearchRequests: u.webSearchRequests,
     },
-    costUSD: call.costUSD ?? costUSD,
+    costUSD,
     isEstimated: call.isEstimated,
     tools: call.tools,
     mcpTools: extractMcpTools(call.tools),
@@ -2742,15 +2790,32 @@ function cachedCallToApiCall(call: CachedCall): ParsedApiCall {
   })
 }
 
+// Set when the parity gate rejected a cached derivation: nothing derived is
+// reused for the rest of the run, so every rollup is re-decided from the turns
+// themselves. Reset per run alongside the other run flags in runParseInner.
+let derivedReuseDisabled = false
+// Turns that had to be classified because the cache carried no derivation for
+// them. Counted so a warm run over a cache written before derivations existed
+// persists them once instead of re-deriving forever.
+let derivationsStashed = 0
+
+/** Turns the last run had to classify for want of a cached derivation — the
+ *  aggregation work a delta could not skip. Zero on a warm run over an
+ *  unchanged corpus. (The parity gate's re-derivation is not counted: it
+ *  decides nothing the run then uses.) */
+export function derivedTurnsClassified(): number {
+  return derivationsStashed
+}
+
 // `resolvedBranch` restores the turn's git branch after the cache's per-turn
 // dedup (branch stored only when it changes). Callers that serve a full session's
 // turns in order carry the last stored value forward and pass it here, so each
 // reconstructed turn regains the "branch active for this turn" the cache elided —
 // and downstream date/day filtering can slice turns without losing the anchor.
-function cachedTurnToClassified(turn: CachedTurn, resolvedBranch?: string): ClassifiedTurn {
+function parsedFromCachedTurn(turn: CachedTurn, resolvedBranch?: string): ParsedTurn {
   const branch = turn.gitBranch ?? resolvedBranch
   const prRefs = turn.prRefs?.length ? turn.prRefs : extractPrUrlsFromText(turn.userMessage)
-  const parsed: ParsedTurn = {
+  return {
     userMessage: turn.userMessage,
     assistantCalls: turn.calls.map(cachedCallToApiCall),
     timestamp: turn.timestamp,
@@ -2759,7 +2824,65 @@ function cachedTurnToClassified(turn: CachedTurn, resolvedBranch?: string): Clas
     ...(prRefs.length ? { prRefs } : {}),
     ...(turn.spawnToolUseIds?.length ? { spawnToolUseIds: turn.spawnToolUseIds } : {}),
   }
-  return classifyTurn(parsed)
+}
+
+function cachedTurnToClassified(turn: CachedTurn, resolvedBranch?: string): ClassifiedTurn {
+  const parsed = parsedFromCachedTurn(turn, resolvedBranch)
+  // The delta: an unchanged turn keeps the verdict it was already given. What
+  // is skipped is the DECISION, never the turn — the classified turn returned
+  // here is the one classifyTurn would have built (classification reads only
+  // `assistantCalls` and `userMessage`, neither of which can change while the
+  // cached turn does not).
+  if (turn.derived && !derivedReuseDisabled) return applyDerivation(parsed, turn.derived)
+  const classified = classifyTurn(parsed)
+  turn.derived = derivationOf(classified)
+  derivationsStashed++
+  return classified
+}
+
+/** Record the derivations decided this run on the entry whose turns produced
+ *  them, with the digest the parity gate checks them against. Per file, so one
+ *  appended session dirties one entry rather than the provider's whole history;
+ *  a no-op (so no write) when nothing landed on the CACHED turns — a serve-time
+ *  rebuild (copilot reconciliation) classifies a turn the cache never holds. */
+function persistDerivations(
+  cache: SessionCache,
+  provider: string,
+  filePath: string,
+  file: CachedFile,
+  stashedBefore: number,
+  readOnly: boolean,
+): void {
+  if (readOnly || derivationsStashed === stashedBefore) return
+  const digest = digestOfCachedFile(file) ?? undefined
+  if (digest === file.derivedDigest) return
+  file.derivedDigest = digest
+  markCacheDirty(cache, provider, filePath)
+}
+
+/** The parity gate's re-derivation: classify as if nothing were cached, and
+ *  leave the cached turn exactly as it was found. */
+function classifyCachedTurnFresh(turn: CachedTurn): ClassifiedTurn {
+  return classifyTurn(parsedFromCachedTurn(turn))
+}
+
+/** The `prefixTailSha` a cache entry should carry, as a spreadable fragment so
+ *  an unhashable file (unreadable, or nothing parsed yet) simply stores no
+ *  claim rather than a false one. One 4KB read per file that actually parsed. */
+async function tailShaFor(filePath: string, offset: number | undefined): Promise<{ prefixTailSha?: string }> {
+  if (offset === undefined) return {}
+  const sha = await prefixTailSha(filePath, offset)
+  return sha === null ? {} : { prefixTailSha: sha }
+}
+
+/** Whether a file's already-parsed prefix still hashes to what was recorded
+ *  when that region was parsed. An entry written before the hash existed has
+ *  nothing to check against and keeps its append. */
+async function appendPrefixIntact(filePath: string, cached: CachedFile): Promise<boolean> {
+  if (cached.prefixTailSha === undefined || cached.lastCompleteLineOffset === undefined) return true
+  if (await prefixTailSha(filePath, cached.lastCompleteLineOffset) === cached.prefixTailSha) return true
+  process.stderr.write(`codeburn: ${filePath} grew but its already-parsed region changed; re-parsing the whole file\n`)
+  return false
 }
 
 // Copilot behavioral-weight assignment + turn folding, applied per session at
@@ -3251,7 +3374,10 @@ function turnSlicedToRange(turn: CachedTurn, dateRange: DateRange): CachedTurn |
   const inRangeCalls = callsInRange(turn.calls, dateRange)
   if (!inRangeCalls) return null
   if (inRangeCalls.length === turn.calls.length) return turn
-  return { ...turn, calls: inRangeCalls, timestamp: inRangeCalls[0]!.timestamp }
+  // Through withCalls like every other call-set rebuild: this slice is not
+  // classified today (callers classify the FULL turn, deliberately), and going
+  // through the one door is what keeps that from mattering if one ever does.
+  return { ...withCalls(turn, inRangeCalls), timestamp: inRangeCalls[0]!.timestamp }
 }
 
 // Same slice, applied post-classification (scanProjectDirs classifies each
@@ -3564,7 +3690,7 @@ export async function parseProviderSources(
             if (freshByKey.size > 0) {
               existingEntry.turns = existingEntry.turns.map(t => {
                 const calls = t.calls.map(c => freshByKey.get(c.deduplicationKey) ?? c)
-                return calls.some((c, i) => c !== t.calls[i]) ? { ...t, calls } : t
+                return calls.some((c, i) => c !== t.calls[i]) ? withCalls(t, calls) : t
               })
             }
             const existingKeys = new Set(
@@ -3954,7 +4080,8 @@ export async function parseProviderSources(
     // Re-anchor a turn whose own stamp cannot parse to its first surviving
     // call, mirroring turnSlicedToRange — day bucketing reads the turn stamp.
     const turnTsValid = !Number.isNaN(new Date(turn.timestamp).getTime())
-    return { ...turn, calls: kept, ...(turnTsValid ? {} : { timestamp: kept[0]!.timestamp }) }
+    const rebuilt = withCalls(turn, kept)
+    return turnTsValid ? rebuilt : { ...rebuilt, timestamp: kept[0]!.timestamp }
   }
 
   // Query-time: derive SessionSummary from all cached turns.
@@ -3964,6 +4091,7 @@ export async function parseProviderSources(
   for (const source of servedSources) {
     const cachedFile = section.files[source.path]
     if (!cachedFile) continue
+    const stashedBefore = derivationsStashed
 
     for (const rawTurn of cachedFile.turns) {
       const turn = reconcileCopilotCalls(rawTurn)
@@ -4032,6 +4160,7 @@ export async function parseProviderSources(
         })
       }
     }
+    persistDerivations(diskCache, providerName, source.path, cachedFile, stashedBefore, readOnly)
   }
 
   // Second pass: durable orphans — cache entries for paths that are no longer
@@ -4040,6 +4169,7 @@ export async function parseProviderSources(
   if (provider.durableSources) {
     for (const [cachedPath, cachedFile] of Object.entries(section.files)) {
       if (allDiscoveredFiles.has(cachedPath)) continue  // already counted above
+      const stashedBefore = derivationsStashed
 
       for (const rawTurn of cachedFile.turns) {
         const turn = reconcileCopilotCalls(rawTurn)
@@ -4083,6 +4213,7 @@ export async function parseProviderSources(
           sessionMap.set(key, { project, projectPath: slicedTurn.calls[0]?.projectPath, workingDirectory: trustedWorkingDirectory, turns: [classified] })
         }
       }
+      persistDerivations(diskCache, providerName, cachedPath, cachedFile, stashedBefore, readOnly)
     }
   }
 
@@ -4706,11 +4837,17 @@ export function correlateCrossProviderPrSessions(projects: ProjectSummary[]): vo
     }
     return lo
   }
-  for (const session of candidates) {
+  // No launch carries a PR, so no candidate can correlate to one: skipping the
+  // scan skips normalizing every user message in the corpus to reach that same
+  // answer. (The normalize below is a loop, not map().find(), for the same
+  // reason — it stops at the first prompt long enough to match on.)
+  for (const session of launches.length > 0 ? candidates : []) {
     const provider = summaryProvider(session)
-    const prompt = session.turns
-      .map(t => normalizedPrompt(t.userMessage))
-      .find(text => text.length >= PROMPT_MIN)
+    let prompt: string | undefined
+    for (const turn of session.turns) {
+      const text = normalizedPrompt(turn.userMessage)
+      if (text.length >= PROMPT_MIN) { prompt = text; break }
+    }
     if (!prompt) continue
     const prefix = prompt.slice(0, PROMPT_PREFIX)
     const startedMs = Date.parse(session.firstTimestamp)
@@ -5369,6 +5506,8 @@ async function runParseInner(
   readOnlyServedStale = false
   deferredRetryableSource = false
   firstPaintDeferredThisRun = 0
+  derivedReuseDisabled = false
+  derivationsStashed = 0
   const seenMsgIds = new Set<string>()
   const seenKeys = new Set<string>()
   const allSources = snapshotOnly ? [] : await discoverAllSessions(providerFilter)
