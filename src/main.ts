@@ -18,6 +18,9 @@ import type { AppliedFix } from './act/types.js'
 import { aggregateModelEfficiency } from './model-efficiency.js'
 import { buildPeriodData, buildMenubarPayloadForRange, buildDurablePeriod, type DurablePeriod } from './usage-aggregator.js'
 import { loadStatusSnapshot, saveStatusSnapshot } from './session-cache.js'
+import { cacheAgeLabel, serveFromAggregateSnapshot, type SnapshotServe } from './aggregate-snapshot.js'
+import type { ModelReportRow } from './models-report.js'
+import type { SessionRow } from './sessions-report.js'
 import { renderDashboard } from './dashboard.js'
 import { renderOverview } from './overview.js'
 import { runWebDashboard } from './web-dashboard.js'
@@ -57,8 +60,34 @@ const { version } = require('../package.json')
 // protects record shape; this protects the meaning of an otherwise valid one.
 const STATUS_SNAPSHOT_RENDER_VERSION = 2
 const STATUS_SNAPSHOT_SEMANTIC_KEY = `${version}:render-${STATUS_SNAPSHOT_RENDER_VERSION}:daily-${DAILY_CACHE_VERSION}`
+// Same idea, own counter: bump when the SHAPE of what a query command hands to
+// `serveFromAggregateSnapshot` changes without a package release (a new column
+// on a report row, a renamed field). The envelope version in session-cache
+// protects the record; this protects the meaning of an otherwise valid one.
+const AGGREGATE_SNAPSHOT_RENDER_VERSION = 1
+const AGGREGATE_SNAPSHOT_SEMANTIC_KEY = `${version}:agg-${AGGREGATE_SNAPSHOT_RENDER_VERSION}:daily-${DAILY_CACHE_VERSION}`
 import { loadCurrency, getCurrency, isValidCurrencyCode } from './currency.js'
 import { CodexThroughputReader, newestCodexSession, renderCodexThroughput } from './codex-throughput.js'
+
+/// Provenance footer for the human-readable renderers. Numbers that came off
+/// disk always say so; a fresh compute prints nothing. Machine formats (json,
+/// csv, markdown) are left byte-identical on purpose — their consumers parse
+/// them, and a `_meta` envelope for those is its own change.
+function writeCacheAgeLine(serve: SnapshotServe<unknown>): void {
+  const label = cacheAgeLabel(serve)
+  if (label) process.stdout.write(`${label}\n`)
+}
+
+/// `status --format json`, before the live plan summaries are attached. Named
+/// so the snapshot can be typed on exactly the part that is safe to persist.
+type StatusJsonPayload = {
+  currency: string
+  today: { cost: number; savings: number; calls: number }
+  month: { cost: number; savings: number; calls: number }
+  localModelSavings?: { today: number; month: number; callsToday: number; callsMonth: number }
+  plan?: JsonPlanSummary
+  plans?: JsonPlanSummaryMap
+}
 
 // A downstream reader that closes the pipe early (`| head`, quitting `less`, or
 // a missing command) makes stdout writes fail with EPIPE. Exit cleanly rather
@@ -950,6 +979,7 @@ program
   .option('--project <name>', 'Show only projects matching name (repeatable)', collect, [])
   .option('--exclude <name>', 'Exclude projects matching name (repeatable)', collect, [])
   .option('--no-color', 'Disable ANSI colors')
+  .option('--refresh', 'Ignore the aggregate snapshot and recompute from the corpus')
   .action(async (opts) => {
     assertProvider(opts.provider, 'overview')
     await loadPricing()
@@ -964,30 +994,55 @@ program
     const { range, label } = customRange
       ? { range: customRange, label: formatDateRangeLabel(opts.from, opts.to) }
       : getDateRange(period!)
-    const durable = await buildDurablePeriod({ range, label }, { provider: opts.provider, project: opts.project, exclude: opts.exclude })
-    const projects = durable.liveProjects
     const config = await readConfig()
-    const budget = isOverviewBudgetFilterActive(opts)
-      ? undefined
-      : buildOverviewBudget(projects, config.budget, budgetTierForOverview(period, customRange), range)
-    process.stdout.write(renderOverview(projects, {
-      label,
-      color: opts.color,
-      budget,
-      durable: {
-        cost: durable.data.cost,
-        savingsUSD: durable.data.savingsUSD,
-        calls: durable.data.calls,
-        sessions: durable.data.sessions,
-        inputTokens: durable.data.inputTokens,
-        outputTokens: durable.data.outputTokens,
-        cacheReadTokens: durable.data.cacheReadTokens,
-        cacheWriteTokens: durable.data.cacheWriteTokens,
-        days: durable.days,
-        carriedCostUSD: durable.carriedCostUSD,
-        unattributedCostUSD: durable.unattributedCostUSD,
+    // The rendered report IS the aggregate here: it is a few KB of already
+    // rolled-up text, and re-deriving it costs a full parse. Snapshot the
+    // rendered string, keyed by everything that changes it — including the
+    // budget block, which lives in config.json and moves no session file.
+    const serve = await serveFromAggregateSnapshot<string>({
+      command: 'overview',
+      scope: {
+        start: range.start.toISOString(),
+        end: range.end.toISOString(),
+        label,
+        provider: opts.provider,
+        project: opts.project,
+        exclude: opts.exclude,
+        color: opts.color !== false,
+        budget: JSON.stringify(config.budget ?? null),
+        budgetTier: budgetTierForOverview(period, customRange),
       },
-    }))
+      providerFilter: opts.provider,
+      semanticKey: AGGREGATE_SNAPSHOT_SEMANTIC_KEY,
+      refresh: !!opts.refresh,
+      compute: async () => {
+        const durable = await buildDurablePeriod({ range, label }, { provider: opts.provider, project: opts.project, exclude: opts.exclude })
+        const projects = durable.liveProjects
+        const budget = isOverviewBudgetFilterActive(opts)
+          ? undefined
+          : buildOverviewBudget(projects, config.budget, budgetTierForOverview(period, customRange), range)
+        return renderOverview(projects, {
+          label,
+          color: opts.color,
+          budget,
+          durable: {
+            cost: durable.data.cost,
+            savingsUSD: durable.data.savingsUSD,
+            calls: durable.data.calls,
+            sessions: durable.data.sessions,
+            inputTokens: durable.data.inputTokens,
+            outputTokens: durable.data.outputTokens,
+            cacheReadTokens: durable.data.cacheReadTokens,
+            cacheWriteTokens: durable.data.cacheWriteTokens,
+            days: durable.days,
+            carriedCostUSD: durable.carriedCostUSD,
+            unattributedCostUSD: durable.unattributedCostUSD,
+          },
+        })
+      },
+    })
+    process.stdout.write(serve.value)
+    writeCacheAgeLine(serve)
   })
 
 program
@@ -1068,6 +1123,7 @@ program
   .option('--days <dates>', 'Comma-separated dates (YYYY-MM-DD) for multi-day selection')
   .option('--no-optimize', 'Skip optimize findings (menubar-json only, faster)')
   .option('--no-timeline', 'Skip the granular timeline (menubar-json only, faster)')
+  .option('--refresh', 'Ignore the aggregate snapshot and recompute from the corpus')
   .addOption(new Option('--claude-config-source <id>').hideHelp())
   .action(async (opts) => {
     assertFormat(opts.format, ['terminal', 'menubar-json', 'json'], 'status')
@@ -1237,8 +1293,20 @@ program
       return
     }
 
-    if (opts.format === 'json') {
-      // Durable totals so the compact status matches the menubar / report.
+    // Both remaining formats read the same two durable periods; the ranges are
+    // day-granular (`getDateRange` ends at 23:59:59.999), so putting them in
+    // the scope is what makes the key roll over at local midnight and forces a
+    // recompute for the new day.
+    const statusScope = {
+      today: getDateRange('today').range.start.toISOString(),
+      month: getDateRange('month').range.start.toISOString(),
+      end: getDateRange('today').range.end.toISOString(),
+      provider: pf,
+      project: opts.project,
+      exclude: opts.exclude,
+    }
+    // Durable totals so the compact status matches the menubar / report.
+    const buildStatusJsonPayload = async (): Promise<StatusJsonPayload> => {
       const todayDurable = await buildDurablePeriod(getDateRange('today'), { provider: pf, project: opts.project, exclude: opts.exclude })
       const todayData = todayDurable.data
       const todayProjects = todayDurable.liveProjects
@@ -1246,14 +1314,7 @@ program
       const monthData = monthDurable.data
       const monthProjects = monthDurable.liveProjects
       const { code, rate } = getCurrency()
-      const payload: {
-        currency: string
-        today: { cost: number; savings: number; calls: number }
-        month: { cost: number; savings: number; calls: number }
-        localModelSavings?: { today: number; month: number; callsToday: number; callsMonth: number }
-        plan?: JsonPlanSummary
-        plans?: JsonPlanSummaryMap
-      } = {
+      const payload: StatusJsonPayload = {
         currency: code,
         today: { cost: Math.round(todayData.cost * rate * 100) / 100, savings: Math.round(todayData.savingsUSD * rate * 100) / 100, calls: todayData.calls },
         month: { cost: Math.round(monthData.cost * rate * 100) / 100, savings: Math.round(monthData.savingsUSD * rate * 100) / 100, calls: monthData.calls },
@@ -1271,16 +1332,43 @@ program
           callsMonth: savingsCallsMonth,
         }
       }
-      console.log(JSON.stringify(await attachPlanSummaries(payload)))
+      return payload
+    }
+
+    if (opts.format === 'json') {
+      // Plan summaries are attached AFTER the snapshot: they read live plan
+      // state (and can hit the network), so they must never be frozen into it.
+      const serve = await serveFromAggregateSnapshot<StatusJsonPayload>({
+        command: 'status:json',
+        scope: statusScope,
+        providerFilter: pf,
+        semanticKey: AGGREGATE_SNAPSHOT_SEMANTIC_KEY,
+        refresh: !!opts.refresh,
+        compute: buildStatusJsonPayload,
+      })
+      console.log(JSON.stringify(await attachPlanSummaries(serve.value)))
       return
     }
 
-    const todayDurable = await buildDurablePeriod(getDateRange('today'), { provider: pf, project: opts.project, exclude: opts.exclude })
-    const monthDurable = await buildDurablePeriod(getDateRange('month'), { provider: pf, project: opts.project, exclude: opts.exclude })
-    console.log(renderStatusBar([], {
-      today: { cost: todayDurable.data.cost, calls: todayDurable.data.calls },
-      month: { cost: monthDurable.data.cost, calls: monthDurable.data.calls },
-    }))
+    const barServe = await serveFromAggregateSnapshot<{ today: { cost: number; calls: number }; month: { cost: number; calls: number } }>({
+      command: 'status:bar',
+      scope: statusScope,
+      providerFilter: pf,
+      semanticKey: AGGREGATE_SNAPSHOT_SEMANTIC_KEY,
+      refresh: !!opts.refresh,
+      compute: async () => {
+        const todayDurable = await buildDurablePeriod(getDateRange('today'), { provider: pf, project: opts.project, exclude: opts.exclude })
+        const monthDurable = await buildDurablePeriod(getDateRange('month'), { provider: pf, project: opts.project, exclude: opts.exclude })
+        return {
+          today: { cost: todayDurable.data.cost, calls: todayDurable.data.calls },
+          month: { cost: monthDurable.data.cost, calls: monthDurable.data.calls },
+        }
+      },
+    })
+    // No cache-age footer on either of these two: the bar line is consumed by
+    // shell prompts and status lines, the json by machines. Both stay
+    // byte-identical; their provenance belongs in a `_meta` envelope.
+    console.log(renderStatusBar([], barServe.value))
   })
 
 program
@@ -2288,6 +2376,7 @@ program
   .option('--unpriced', 'Show only models with usage that currently price at $0')
   .option('--no-totals', 'Suppress the footer totals row')
   .option('--format <format>', 'Output format: table, markdown, json, csv', 'table')
+  .option('--refresh', 'Ignore the aggregate snapshot and recompute from the corpus')
   .action(async (opts) => {
     assertProvider(opts.provider, 'models')
     if (opts.byTask && opts.byAgent) {
@@ -2309,19 +2398,30 @@ program
       range = getDateRange(opts.period).range
     }
 
-    const projects = await parseAllSessions(range, opts.provider)
     const topN = typeof opts.top === 'number' && Number.isFinite(opts.top) ? opts.top : undefined
-    let rows = await aggregateModels(projects, {
+    // `aggregateModels` filters and slices before the unpriced filter. Its
+    // rows are sorted cost-first, so a small --top would remove exactly the
+    // rows `--unpriced` exists to show. Take the whole set here and slice
+    // after filtering and ranking instead.
+    const aggregateOpts = {
       byTask: !!opts.byTask,
       byAgent: !!opts.byAgent,
       taskFilter: opts.task,
-      // `aggregateModels` filters and slices before the unpriced filter. Its
-      // rows are sorted cost-first, so a small --top would remove exactly the
-      // rows `--unpriced` exists to show. Take the whole set here and slice
-      // after filtering and ranking instead.
       topN: opts.unpriced ? undefined : topN,
       minCost: typeof opts.minCost === 'number' && Number.isFinite(opts.minCost) ? opts.minCost : (opts.unpriced ? 0 : 0.01),
+    }
+    // The parse + rollup below is the whole cost of this command; the
+    // `--unpriced` pass after it is pure in-memory ranking. Snapshot exactly
+    // the rollup, keyed by the range/provider/flags that produced it.
+    const serve = await serveFromAggregateSnapshot<ModelReportRow[]>({
+      command: 'models',
+      scope: { start: range.start.toISOString(), end: range.end.toISOString(), provider: opts.provider, ...aggregateOpts },
+      providerFilter: opts.provider,
+      semanticKey: AGGREGATE_SNAPSHOT_SEMANTIC_KEY,
+      refresh: !!opts.refresh,
+      compute: async () => aggregateModels(await parseAllSessions(range, opts.provider), aggregateOpts),
     })
+    let rows = serve.value
     if (opts.unpriced) {
       const unpriced = findUnpricedModels(rows.map(row => ({
         model: row.model,
@@ -2364,6 +2464,7 @@ program
       // Never advise aliasing unconditionally: a subscription or flat-rate model
       // is correctly $0, and mapping it onto another model's rate invents spend.
       if (opts.unpriced) process.stdout.write(unpricedModelHint() + '\n')
+      writeCacheAgeLine(serve)
     } else {
       process.stderr.write(`codeburn: unknown --format "${opts.format}". Choose table, markdown, json, or csv.\n`)
       process.exit(1)
@@ -2381,6 +2482,7 @@ program
   .option('--by-pr', 'Group spend by the pull requests each session referenced')
   .option('--by-work-unit', 'Group sessions into provider-recorded work units: one row per orchestration root with its delegated children folded beneath')
   .option('--no-pager', 'Print the complete table directly instead of opening the interactive browser')
+  .option('--refresh', 'Ignore the aggregate snapshot and recompute from the corpus')
   .action(async (opts) => {
     assertProvider(opts.provider, 'sessions')
     assertFormat(opts.format, ['table', 'json'], 'sessions')
@@ -2401,8 +2503,12 @@ program
       range = getDateRange(opts.period).range
     }
 
-    const projects = await parseAllSessions(range, opts.provider)
+    // `--by-pr` and `--by-work-unit` read structure the row set does not carry
+    // (PR links, session lineage), so those two views still need the parsed
+    // corpus and are not served from the snapshot. Everything else — json,
+    // table, the interactive browser — renders from `SessionRow[]` alone.
     if (opts.byPr) {
+      const projects = await parseAllSessions(range, opts.provider)
       const { rows: prRows, totals } = buildPrAttribution(projects)
       if (opts.format === 'json') {
         process.stdout.write(JSON.stringify({ prs: prRows, distinct: totals }, null, 2) + '\n')
@@ -2450,8 +2556,9 @@ program
       process.stdout.write(table + `\nRows sum to $${shownAttributed.toFixed(2)} attributed across ${sessions} PR-linked session${sessions === 1 ? '' : 's'}${subagentNote}. $${unattributedCost.toFixed(2)} of that spend was not tied to a specific PR.${approxNote}\n`)
       return
     }
-    const rows = aggregateSessions(projects)
     if (opts.byWorkUnit) {
+      const projects = await parseAllSessions(range, opts.provider)
+      const rows = aggregateSessions(projects)
       const { resolveWorkUnits } = await import('./work-units.js')
       const { inferSessionProvider } = await import('./session-output.js')
       const resolution = resolveWorkUnits(projects.flatMap(project => project.sessions.map(session => ({
@@ -2466,6 +2573,16 @@ program
       process.stdout.write(renderWorkUnitTable(rows, resolution) + '\n')
       return
     }
+
+    const serve = await serveFromAggregateSnapshot<SessionRow[]>({
+      command: 'sessions',
+      scope: { start: range.start.toISOString(), end: range.end.toISOString(), provider: opts.provider },
+      providerFilter: opts.provider,
+      semanticKey: AGGREGATE_SNAPSHOT_SEMANTIC_KEY,
+      refresh: !!opts.refresh,
+      compute: async () => aggregateSessions(await parseAllSessions(range, opts.provider)),
+    })
+    const rows = serve.value
     if (opts.format === 'json') {
       process.stdout.write(renderJson(rows) + '\n')
       return
@@ -2477,6 +2594,7 @@ program
       return
     }
     process.stdout.write(renderTable(rows) + '\n')
+    writeCacheAgeLine(serve)
   })
 
 program

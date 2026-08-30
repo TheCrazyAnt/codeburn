@@ -1842,7 +1842,14 @@ const STATUS_SNAPSHOT_FILE = 'status-snapshot'
 // resolution time at which its corpus scan began. The latter is the ordering
 // fence for competing writers: max(file mtime) is not monotonic because
 // deleting the newest file legitimately makes it decrease.
-const STATUS_SNAPSHOT_VERSION = 3
+//
+// v4: every record carries `completedAt`, the wall-clock time the payload
+// finished being computed. `observedAtMs` is a high-resolution monotonic-ish
+// stamp for ordering writers and is NOT a wall clock, so nothing could tell a
+// reader how old a served payload actually is. Freshness labelling ("cached as
+// of 23:45") needs a real wall clock, so it is its own field rather than a
+// reinterpretation of an existing one.
+const STATUS_SNAPSHOT_VERSION = 4
 
 type StatusSnapshotRecord = {
   version: number
@@ -1850,6 +1857,9 @@ type StatusSnapshotRecord = {
   corpusFingerprint: string
   newestMtimeMs: number
   observedAtMs: number
+  /// Wall-clock `Date.now()` at which the payload was computed. Read back by
+  /// `loadStatusSnapshotEntry` so a caller can label what it is serving.
+  completedAt: number
   // Kept alongside the hash in the filename as a defensive re-check against
   // a (vanishingly unlikely) hash collision between two different queries.
   queryKey: string
@@ -1893,6 +1903,7 @@ async function readStatusSnapshotRecord(queryKey: string): Promise<StatusSnapsho
       typeof parsed.corpusFingerprint !== 'string' ||
       typeof parsed.newestMtimeMs !== 'number' || !Number.isFinite(parsed.newestMtimeMs) ||
       typeof parsed.observedAtMs !== 'number' || !Number.isFinite(parsed.observedAtMs) ||
+      typeof parsed.completedAt !== 'number' || !Number.isFinite(parsed.completedAt) ||
       parsed.queryKey !== queryKey
     ) return null
     return parsed as StatusSnapshotRecord
@@ -1985,20 +1996,52 @@ async function writeStatusSnapshotRecord(
  *  THIS record's fingerprint first stopped matching makes the settle window
  *  a true bound regardless of what else in the corpus is busy. */
 export async function loadStatusSnapshot(corpusFingerprint: string, queryKey: string, semanticKey: string): Promise<unknown | null> {
+  return (await loadStatusSnapshotEntry(corpusFingerprint, queryKey, semanticKey, { settle: true }))?.payload ?? null
+}
+
+/** Same lookup as `loadStatusSnapshot`, but also hands back the wall-clock time
+ *  the payload was computed so a caller can label what it is serving ("cached
+ *  as of 23:45").
+ *
+ *  `settle` (default true) is the menubar's debounce described above. A
+ *  high-frequency poller wants it: a streaming turn touches its transcript many
+ *  times a second and recomputing on each tick costs a full parse. A one-shot
+ *  CLI command does NOT: the user ran it deliberately, once, and a fingerprint
+ *  that no longer matches is exactly the case where the answer may have moved.
+ *  Passing `settle: false` makes a hit mean strictly "the corpus has not
+ *  changed", with no grace period at all. */
+export async function loadStatusSnapshotEntry(
+  corpusFingerprint: string,
+  queryKey: string,
+  semanticKey: string,
+  opts: { settle?: boolean } = {},
+): Promise<{ payload: unknown; completedAt: number } | null> {
+  const payload = await loadStatusSnapshotPayload(corpusFingerprint, queryKey, semanticKey, opts.settle !== false)
+  return payload.hit ? { payload: payload.payload, completedAt: payload.completedAt } : null
+}
+
+type SnapshotLookup = { hit: false } | { hit: true; payload: unknown; completedAt: number }
+
+async function loadStatusSnapshotPayload(corpusFingerprint: string, queryKey: string, semanticKey: string, settle: boolean): Promise<SnapshotLookup> {
+  const miss: SnapshotLookup = { hit: false }
   const stored = await readStatusSnapshotRecord(queryKey)
-  if (!stored) return null
-  if (stored.semanticKey !== semanticKey) return null
+  if (!stored) return miss
+  if (stored.semanticKey !== semanticKey) return miss
   // Belt-and-braces mirror of the save gate in main.ts: a payload marked
   // degraded (`stale === true` or a `hydration` block) must never have been
   // persisted, so one that somehow was (an older build, a hand-edited file)
   // is treated as a miss and recomputed rather than served.
   const candidate = stored.payload as { stale?: unknown; hydration?: unknown } | null | undefined
-  if (candidate !== null && typeof candidate === 'object' && (candidate.stale === true || candidate.hydration !== undefined)) return null
-  if (stored.corpusFingerprint === corpusFingerprint) return stored.payload ?? null
+  if (candidate !== null && typeof candidate === 'object' && (candidate.stale === true || candidate.hydration !== undefined)) return miss
+  const served: SnapshotLookup = stored.payload === null || stored.payload === undefined
+    ? miss
+    : { hit: true, payload: stored.payload, completedAt: stored.completedAt }
+  if (stored.corpusFingerprint === corpusFingerprint) return served
+  if (!settle) return miss
 
   const now = Date.now()
   const firstSeenAt = stored.mismatchFirstSeenAt ?? now
-  if (now - firstSeenAt >= statusSnapshotSettleMs()) return null
+  if (now - firstSeenAt >= statusSnapshotSettleMs()) return miss
   if (stored.mismatchFirstSeenAt === undefined) {
     // Bookkeeping-only write: only proceed if the on-disk record is exactly
     // what we just read (same corpusFingerprint, still no
@@ -2018,9 +2061,9 @@ export async function loadStatusSnapshot(corpusFingerprint: string, queryKey: st
     // Serving stale is safe only when the first-observed timestamp is durable.
     // Otherwise each short-lived CLI process starts a fresh grace window and a
     // read-only or broken cache can serve the old payload forever.
-    if (!persisted) return null
+    if (!persisted) return miss
   }
-  return stored.payload ?? null
+  return served
 }
 
 /** Best-effort: a failed write just means the next poll recomputes instead
@@ -2039,10 +2082,11 @@ export async function saveStatusSnapshot(
   queryKey: string,
   semanticKey: string,
   payload: unknown,
+  completedAt: number = Date.now(),
 ): Promise<boolean> {
   return writeStatusSnapshotRecord(
     queryKey,
-    { version: STATUS_SNAPSHOT_VERSION, semanticKey, corpusFingerprint, newestMtimeMs, observedAtMs, queryKey, payload },
+    { version: STATUS_SNAPSHOT_VERSION, semanticKey, corpusFingerprint, newestMtimeMs, observedAtMs, completedAt, queryKey, payload },
     existing => !existing
       || existing.semanticKey !== semanticKey
       || existing.observedAtMs < observedAtMs
