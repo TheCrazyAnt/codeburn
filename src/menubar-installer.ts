@@ -27,6 +27,8 @@ const SUPPORTED_OS = 'darwin'
 /// rewrites the spaces in the bundle name to dots when it stores the asset, so both the asset
 /// name and its download URL carry `CodeBurn.Menubar_...`.
 const WINDOWS_PRODUCT_NAME = 'CodeBurn Menubar'
+/// Tauri names the binary after the crate (windows/src-tauri/Cargo.toml), not the product.
+const WINDOWS_EXE_NAME = 'codeburn-menubar.exe'
 const WINDOWS_ASSET_PATTERN = /^CodeBurn\.Menubar_.+_x64_en-US\.msi$/
 const MIN_MACOS_MAJOR = 14
 const PERSISTED_CLI_PATH = join(homedir(), 'Library', 'Application Support', 'CodeBurn', 'codeburn-cli-path.v1')
@@ -563,7 +565,7 @@ export function parseInstalledWindowsMenubar(regOutput: string): InstalledWindow
     // InstallLocation to join onto.
     const icon = values.get('DisplayIcon')?.split(',')[0]?.trim()
     const exePath = location
-      ? `${location.replace(/[\\/]+$/, '')}\\${WINDOWS_PRODUCT_NAME}.exe`
+      ? `${location.replace(/[\\/]+$/, '')}\\${WINDOWS_EXE_NAME}`
       : icon
     if (!exePath) continue
     return { version: values.get('DisplayVersion') ?? '', exePath }

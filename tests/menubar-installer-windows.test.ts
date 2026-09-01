@@ -106,7 +106,7 @@ describe('parseInstalledWindowsMenubar', () => {
   it('reads the version and joins the exe onto InstallLocation', () => {
     expect(parseInstalledWindowsMenubar(INSTALLED_0_9_20)).toEqual({
       version: '0.9.20',
-      exePath: 'C:\\Program Files\\CodeBurn Menubar\\CodeBurn Menubar.exe',
+      exePath: 'C:\\Program Files\\CodeBurn Menubar\\codeburn-menubar.exe',
     })
   })
 
@@ -114,10 +114,10 @@ describe('parseInstalledWindowsMenubar', () => {
     const output = regBlock({
       DisplayName: 'CodeBurn Menubar',
       DisplayVersion: '0.9.20',
-      DisplayIcon: 'C:\\Program Files\\CodeBurn Menubar\\CodeBurn Menubar.exe,0',
+      DisplayIcon: 'C:\\Program Files\\CodeBurn Menubar\\codeburn-menubar.exe,0',
     })
 
-    expect(parseInstalledWindowsMenubar(output)?.exePath).toBe('C:\\Program Files\\CodeBurn Menubar\\CodeBurn Menubar.exe')
+    expect(parseInstalledWindowsMenubar(output)?.exePath).toBe('C:\\Program Files\\CodeBurn Menubar\\codeburn-menubar.exe')
   })
 
   it('returns undefined when the product is not installed', () => {
@@ -171,8 +171,8 @@ describe('installMenubarApp on windows', () => {
 
     expect(fetches).toBe(0)
     expect(installerCalls).toEqual([])
-    expect(launched).toEqual(['C:\\Program Files\\CodeBurn Menubar\\CodeBurn Menubar.exe'])
-    expect(result).toEqual({ installedPath: 'C:\\Program Files\\CodeBurn Menubar\\CodeBurn Menubar.exe', launched: true })
+    expect(launched).toEqual(['C:\\Program Files\\CodeBurn Menubar\\codeburn-menubar.exe'])
+    expect(result).toEqual({ installedPath: 'C:\\Program Files\\CodeBurn Menubar\\codeburn-menubar.exe', launched: true })
   })
 
   it('downloads, verifies, runs msiexec from System32 and launches the installed app', async () => {
@@ -189,7 +189,7 @@ describe('installMenubarApp on windows', () => {
       exe: 'C:\\Windows\\System32\\msiexec.exe',
       args: ['/i', join(sandbox, 'CodeBurn.Menubar_0.9.20_x64_en-US.msi'), '/passive', '/norestart'],
     }])
-    expect(launched).toEqual(['C:\\Program Files\\CodeBurn Menubar\\CodeBurn Menubar.exe'])
+    expect(launched).toEqual(['C:\\Program Files\\CodeBurn Menubar\\codeburn-menubar.exe'])
     expect(result.launched).toBe(true)
     expect(logs).toContain('Downloading CodeBurn.Menubar_0.9.20_x64_en-US.msi...')
     expect(logs).toContain('Verifying checksum...')
