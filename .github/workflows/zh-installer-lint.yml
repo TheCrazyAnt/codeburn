@@ -1,0 +1,56 @@
+name: zh installer lint
+
+# The Chinese fork ships two installer scripts that its users pipe straight into
+# a shell. They are authored on macOS, where PowerShell is usually absent, so the
+# .ps1 is parsed on a real Windows runner here and the .sh is checked with bash -n
+# and shellcheck. Cheap insurance against shipping a script that cannot even parse.
+on:
+  push:
+    branches: [zh-hans]
+    paths:
+      - windows/Scripts/install-zh.ps1
+      - mac/Scripts/install-zh.sh
+      - .github/workflows/zh-installer-lint.yml
+  pull_request:
+    paths:
+      - windows/Scripts/install-zh.ps1
+      - mac/Scripts/install-zh.sh
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  powershell:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Parse install-zh.ps1
+        shell: pwsh
+        run: |
+          $errors = $null
+          $null = [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path 'windows/Scripts/install-zh.ps1'), [ref]$null, [ref]$errors)
+          if ($errors) {
+            $errors | ForEach-Object { Write-Host "::error::$($_.Extent.StartLineNumber): $($_.Message)" }
+            exit 1
+          }
+          Write-Host 'install-zh.ps1 parses cleanly.'
+      - name: PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -ErrorAction Stop
+          $found = Invoke-ScriptAnalyzer -Path windows/Scripts/install-zh.ps1 -Severity Error,Warning
+          $found | Format-Table -AutoSize
+          if ($found | Where-Object Severity -eq 'Error') { exit 1 }
+
+  bash:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Syntax check install-zh.sh
+        run: bash -n mac/Scripts/install-zh.sh
+      - name: shellcheck
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y shellcheck
+          shellcheck -S warning mac/Scripts/install-zh.sh
