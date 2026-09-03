@@ -23,6 +23,8 @@ private let requestTimeoutSeconds: TimeInterval = 30
 
 /// Board selector shared by the popover segmented control and the API query.
 enum LeaderboardBoard: String, CaseIterable, Identifiable, Sendable {
+    /// Local calendar week, Monday 00:00 → now, keyed as ISO week `YYYY-Www`.
+    case week
     case month
     case lifetime
 
@@ -30,8 +32,44 @@ enum LeaderboardBoard: String, CaseIterable, Identifiable, Sendable {
 
     var displayName: String {
         switch self {
+        case .week: L("This week")
         case .month: L("This month")
         case .lifetime: L("Lifetime")
+        }
+    }
+}
+
+/// What a board ranks by. Raw values are the API's stable `metric` ids.
+enum LeaderboardMetric: String, CaseIterable, Identifiable, Sendable {
+    /// Model output tokens. The default board.
+    case output
+    /// Spend in USD.
+    case usd
+    /// Consecutive active days (a per-user scalar, the same on every period board).
+    case streak
+
+    static let `default`: LeaderboardMetric = .output
+    /// UserDefaults key the popover remembers its metric under.
+    static let defaultsKey = "CodeBurnLeaderboardMetric"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .output: L("Output")
+        case .usd: L("Spend")
+        case .streak: L("Streak")
+        }
+    }
+
+    /// Formats a ranked value the way the board shows it: tokens compact
+    /// (1.2M / 340K), spend in the display currency, streak as days.
+    @MainActor
+    func format(_ value: Double) -> String {
+        switch self {
+        case .output: value.asCompactTokens()
+        case .usd: value.asCompactCurrency()
+        case .streak: L("\(Int(value.rounded())) days")
         }
     }
 }
@@ -40,6 +78,8 @@ enum LeaderboardBoard: String, CaseIterable, Identifiable, Sendable {
 
 struct LeaderboardConfig: Codable, Sendable, Equatable {
     struct Board: Codable, Sendable, Equatable {
+        /// Server's current UTC ISO week (`YYYY-Www`); absent on older servers.
+        let week: String?
         let month: String?
     }
 
@@ -66,28 +106,59 @@ struct LeaderboardSessionResponse: Codable, Sendable, Equatable {
     let user: LeaderboardUser
 }
 
-struct LeaderboardEntry: Codable, Sendable, Equatable, Identifiable {
+/// Per-metric numbers a board row carries, plus the server's ranked `value`.
+protocol LeaderboardMetricValues {
+    var usd: Double? { get }
+    var outputTokens: Int? { get }
+    var streakDays: Int? { get }
+    var value: Double? { get }
+}
+
+extension LeaderboardMetricValues {
+    /// The row's number for `metric`, from the row's own fields (the server's
+    /// `value` is only meaningful for the metric the page was fetched with).
+    func metricValue(_ metric: LeaderboardMetric) -> Double? {
+        switch metric {
+        case .usd: usd
+        case .output: outputTokens.map(Double.init)
+        case .streak: streakDays.map(Double.init)
+        }
+    }
+}
+
+struct LeaderboardEntry: Codable, Sendable, Equatable, Identifiable, LeaderboardMetricValues {
     let rank: Int
     let login: String
     let avatarUrl: String?
-    let usd: Double
+    let usd: Double?
     let tokens: Int?
+    let outputTokens: Int?
+    let streakDays: Int?
     let calls: Int?
     let topProvider: String?
+    /// The number this page is ranked by (per the page's `metric`).
+    let value: Double?
 
     var id: String { "\(rank)#\(login)" }
 }
 
-struct LeaderboardMe: Codable, Sendable, Equatable {
+struct LeaderboardMe: Codable, Sendable, Equatable, LeaderboardMetricValues {
     let rank: Int?
     let usd: Double?
     let tokens: Int?
+    let outputTokens: Int?
+    let streakDays: Int?
     let calls: Int?
+    let value: Double?
     let flagged: Bool?
 }
 
 struct LeaderboardPage: Codable, Sendable, Equatable {
     let board: String
+    /// Ranking metric id (`output` / `usd` / `streak`); absent on older servers (= spend).
+    let metric: String?
+    /// `week` is set on the week board, `month` on the others; never both.
+    let week: String?
     let month: String?
     let updatedAt: String?
     let totalUsers: Int?
@@ -106,9 +177,25 @@ struct LeaderboardReport: Codable, Sendable, Equatable {
     let monthUSD: Double
     let monthTokens: Int
     let monthCalls: Int
+    /// Calendar-week slice (local Monday 00:00 → now), keyed as ISO week
+    /// `YYYY-Www`. The four travel together: all set, or all omitted when
+    /// the week could not be sourced. Not bounded by the month (a week can
+    /// straddle two months), only by lifetime.
+    let week: String?
+    let weekUSD: Double?
+    let weekTokens: Int?
+    let weekCalls: Int?
+    let weekOutputTokens: Int?
     let lifetimeUSD: Double
     let lifetimeTokens: Int
     let lifetimeCalls: Int
+    /// Model output tokens per period (each ≤ the period's token total).
+    let monthOutputTokens: Int
+    let lifetimeOutputTokens: Int
+    /// Consecutive active days ending today (or yesterday when today has no
+    /// calls yet), and distinct active days in the daily series.
+    let streakDays: Int
+    let activeDays: Int
     /// Omitted (not `[]`) when the payload carries no provider split.
     let byProvider: [ProviderSplit]?
     let appVersion: String
@@ -116,9 +203,22 @@ struct LeaderboardReport: Codable, Sendable, Equatable {
 }
 
 struct LeaderboardReportResponse: Codable, Sendable, Equatable {
-    struct Ranks: Codable, Sendable, Equatable {
+    struct PeriodRanks: Codable, Sendable, Equatable {
+        /// Null when the report carried no week slice.
+        let week: Int?
         let month: Int?
         let lifetime: Int?
+    }
+
+    /// The flat `week/month/lifetime` are the spend ranks (what pre-metric
+    /// servers send); `usd/output/streak` carry one set per metric.
+    struct Ranks: Codable, Sendable, Equatable {
+        let week: Int?
+        let month: Int?
+        let lifetime: Int?
+        let usd: PeriodRanks?
+        let output: PeriodRanks?
+        let streak: PeriodRanks?
     }
 
     let ok: Bool
@@ -206,12 +306,15 @@ enum LeaderboardReportBuilder {
         var tokens: Int
         var calls: Int
         var providers: [String: Double]
+        /// Model output tokens, a subset of `tokens`.
+        var outputTokens: Int
 
-        init(usd: Double, tokens: Int, calls: Int, providers: [String: Double] = [:]) {
+        init(usd: Double, tokens: Int, calls: Int, providers: [String: Double] = [:], outputTokens: Int = 0) {
             self.usd = usd
             self.tokens = tokens
             self.calls = calls
             self.providers = providers
+            self.outputTokens = outputTokens
         }
     }
 
@@ -221,8 +324,36 @@ enum LeaderboardReportBuilder {
             usd: current.cost,
             tokens: current.inputTokens + current.outputTokens + current.cacheReadTokens + current.cacheWriteTokens,
             calls: current.calls,
-            providers: providerSplit(current)
+            providers: providerSplit(current),
+            outputTokens: current.outputTokens
         )
+    }
+
+    /// Streak of consecutive active days (≥ 1 call) ending today, or ending
+    /// yesterday when today has no calls yet, plus the distinct active days
+    /// in the series. Derived from a per-day series, so a series shorter
+    /// than the true streak caps it at the series length.
+    struct Activity: Equatable, Sendable {
+        var streakDays: Int
+        var activeDays: Int
+
+        static let none = Activity(streakDays: 0, activeDays: 0)
+    }
+
+    static func activity(from daily: [DailyHistoryEntry], now: Date, calendar: Calendar = .current) -> Activity {
+        let activeDays = Set(daily.lazy.filter { $0.calls > 0 }.map(\.date))
+        var cursor = now
+        if !activeDays.contains(dayKey(cursor, calendar: calendar)),
+           let yesterday = calendar.date(byAdding: .day, value: -1, to: cursor) {
+            cursor = yesterday
+        }
+        var streak = 0
+        while activeDays.contains(dayKey(cursor, calendar: calendar)) {
+            streak += 1
+            guard let previous = calendar.date(byAdding: .day, value: -1, to: cursor) else { break }
+            cursor = previous
+        }
+        return Activity(streakDays: streak, activeDays: activeDays.count)
     }
 
     /// `providerDetails` (stable ids) wins when the CLI emits it; the legacy
@@ -253,10 +384,65 @@ enum LeaderboardReportBuilder {
         return String(format: "%04d-%02d", components.year ?? 0, components.month ?? 0)
     }
 
+    /// `calendar` with ISO 8601 week rules: weeks start on Monday and week 1
+    /// is the one holding January 4. The time zone stays the caller's, so the
+    /// week boundary is the local Monday, matching what the user sees.
+    static func isoWeekCalendar(_ calendar: Calendar) -> Calendar {
+        var iso = calendar
+        iso.firstWeekday = 2
+        iso.minimumDaysInFirstWeek = 4
+        return iso
+    }
+
+    /// Client's current ISO calendar week in local time, `YYYY-Www`. The
+    /// server keys the board by UTC ISO week and tolerates ±1 week, which
+    /// covers the hours around Monday 00:00 where local and UTC differ.
+    static func weekKey(for date: Date, calendar: Calendar = .current) -> String {
+        let components = isoWeekCalendar(calendar).dateComponents([.yearForWeekOfYear, .weekOfYear], from: date)
+        return String(format: "%04d-W%02d", components.yearForWeekOfYear ?? 0, components.weekOfYear ?? 0)
+    }
+
+    /// Local Monday 00:00 of the week containing `date`.
+    static func weekStart(for date: Date, calendar: Calendar = .current) -> Date {
+        isoWeekCalendar(calendar).dateInterval(of: .weekOfYear, for: date)?.start ?? date
+    }
+
+    /// Week totals for the leaderboard: the 30-day payload's per-day series
+    /// (`history.daily`) summed from local Monday through today inclusive.
+    /// Each day carries cost, calls and all four token counts, so the sum has
+    /// the same shape as a period's `current` block. The CLI keys days as
+    /// `yyyy-MM-dd` in the machine's local time, the same clock `calendar`
+    /// runs on, so a plain string range picks the right days. The daily
+    /// series has no provider split, so `providers` stays empty and the
+    /// report's `byProvider` keeps coming from the month and lifetime slices.
+    static func weekTotals(from thirtyDayPayload: MenubarPayload, now: Date, calendar: Calendar = .current) -> Totals {
+        let first = dayKey(weekStart(for: now, calendar: calendar), calendar: calendar)
+        let last = dayKey(now, calendar: calendar)
+        var totals = Totals(usd: 0, tokens: 0, calls: 0)
+        for day in thirtyDayPayload.history.daily where day.date >= first && day.date <= last {
+            totals.usd += day.cost
+            totals.tokens += day.inputTokens + day.outputTokens + day.cacheReadTokens + day.cacheWriteTokens
+            totals.outputTokens += day.outputTokens
+            totals.calls += day.calls
+        }
+        return totals
+    }
+
+    /// `yyyy-MM-dd` in `calendar`'s time zone, the CLI's day-key format.
+    static func dayKey(_ date: Date, calendar: Calendar = .current) -> String {
+        let components = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", components.year ?? 0, components.month ?? 0, components.day ?? 0)
+    }
+
+    /// `week` and `weekKey` are optional together: the week slice ships only
+    /// when both are known, otherwise the report is a month + lifetime one.
     static func build(
         month: Totals,
         lifetime: Totals,
         monthKey: String,
+        week: Totals? = nil,
+        weekKey: String? = nil,
+        activity: Activity = .none,
         appVersion: String,
         reportedAt: Date
     ) throws -> LeaderboardReport {
@@ -266,14 +452,30 @@ enum LeaderboardReportBuilder {
         try validate(Double(lifetime.tokens), "lifetimeTokens")
         try validate(Double(month.calls), "monthCalls")
         try validate(Double(lifetime.calls), "lifetimeCalls")
+        try validate(Double(month.outputTokens), "monthOutputTokens")
+        try validate(Double(lifetime.outputTokens), "lifetimeOutputTokens")
+        try validate(Double(activity.streakDays), "streakDays")
+        try validate(Double(activity.activeDays), "activeDays")
 
-        // Month and lifetime are two separate CLI fetches; a call that landed
-        // between them can make the month slice edge past lifetime. Lifetime
-        // is by definition the larger, so lift it rather than ship a report
+        var weekSlice: (key: String, totals: Totals)?
+        if let week, let weekKey {
+            try validate(week.usd, "weekUSD")
+            try validate(Double(week.tokens), "weekTokens")
+            try validate(Double(week.calls), "weekCalls")
+            try validate(Double(week.outputTokens), "weekOutputTokens")
+            weekSlice = (weekKey, week)
+        }
+
+        // Month, week and lifetime are separate CLI fetches; a call that
+        // landed between them can make a slice edge past lifetime. Lifetime
+        // is by definition the largest, so lift it rather than ship a report
         // the server would reject as implausible.
-        let lifetimeUSD = max(lifetime.usd, month.usd)
-        let lifetimeTokens = max(lifetime.tokens, month.tokens)
-        let lifetimeCalls = max(lifetime.calls, month.calls)
+        let lifetimeUSD = max(lifetime.usd, month.usd, weekSlice?.totals.usd ?? 0)
+        let lifetimeTokens = max(lifetime.tokens, month.tokens, weekSlice?.totals.tokens ?? 0)
+        let lifetimeCalls = max(lifetime.calls, month.calls, weekSlice?.totals.calls ?? 0)
+        let lifetimeOutputTokens = max(lifetime.outputTokens, month.outputTokens, weekSlice?.totals.outputTokens ?? 0)
+        // A streak is a run of active days, so it can never exceed them.
+        let activeDays = max(activity.activeDays, activity.streakDays)
 
         let ids = Set(month.providers.keys).union(lifetime.providers.keys)
         let byProvider: [LeaderboardReport.ProviderSplit]? = ids.isEmpty ? nil : ids
@@ -294,9 +496,18 @@ enum LeaderboardReportBuilder {
             monthUSD: month.usd,
             monthTokens: month.tokens,
             monthCalls: month.calls,
+            week: weekSlice?.key,
+            weekUSD: weekSlice?.totals.usd,
+            weekTokens: weekSlice?.totals.tokens,
+            weekCalls: weekSlice?.totals.calls,
+            weekOutputTokens: weekSlice?.totals.outputTokens,
             lifetimeUSD: lifetimeUSD,
             lifetimeTokens: lifetimeTokens,
             lifetimeCalls: lifetimeCalls,
+            monthOutputTokens: month.outputTokens,
+            lifetimeOutputTokens: lifetimeOutputTokens,
+            streakDays: activity.streakDays,
+            activeDays: activeDays,
             byProvider: byProvider,
             appVersion: appVersion,
             reportedAt: iso8601(reportedAt)
@@ -464,9 +675,61 @@ final class LeaderboardService {
         case failed(String)
     }
 
-    struct MyRank: Equatable, Sendable {
+    struct PeriodRanks: Equatable, Sendable {
+        var week: Int?
         var month: Int?
         var lifetime: Int?
+
+        subscript(_ board: LeaderboardBoard) -> Int? {
+            get {
+                switch board {
+                case .week: week
+                case .month: month
+                case .lifetime: lifetime
+                }
+            }
+            set {
+                switch board {
+                case .week: week = newValue
+                case .month: month = newValue
+                case .lifetime: lifetime = newValue
+                }
+            }
+        }
+    }
+
+    /// The user's own rank per metric and board: seeded by the report
+    /// response, refreshed by every board load that carries `me`.
+    struct MyRank: Equatable, Sendable {
+        private var byMetric: [LeaderboardMetric: PeriodRanks] = [:]
+
+        init() {}
+
+        /// Nested per-metric ranks win; the flat fields are the spend ranks
+        /// an older server sends.
+        init(_ ranks: LeaderboardReportResponse.Ranks) {
+            func periods(_ wire: LeaderboardReportResponse.PeriodRanks) -> PeriodRanks {
+                PeriodRanks(week: wire.week, month: wire.month, lifetime: wire.lifetime)
+            }
+            self[.usd] = ranks.usd.map(periods) ?? PeriodRanks(week: ranks.week, month: ranks.month, lifetime: ranks.lifetime)
+            if let output = ranks.output { self[.output] = periods(output) }
+            if let streak = ranks.streak { self[.streak] = periods(streak) }
+        }
+
+        subscript(_ metric: LeaderboardMetric) -> PeriodRanks {
+            get { byMetric[metric] ?? PeriodRanks() }
+            set { byMetric[metric] = newValue }
+        }
+
+        func rank(_ metric: LeaderboardMetric, _ board: LeaderboardBoard) -> Int? {
+            self[metric][board]
+        }
+    }
+
+    /// One cached page per (board, metric).
+    struct BoardKey: Hashable, Sendable {
+        let board: LeaderboardBoard
+        let metric: LeaderboardMetric
     }
 
     /// Injectable seams so the pure parts stay testable without a network.
@@ -517,9 +780,9 @@ final class LeaderboardService {
     private(set) var myRank = MyRank()
     private(set) var isUploading = false
     private(set) var isDeletingData = false
-    private(set) var boards: [LeaderboardBoard: LeaderboardPage] = [:]
-    private(set) var boardErrors: [LeaderboardBoard: String] = [:]
-    private(set) var loadingBoards: Set<LeaderboardBoard> = []
+    private(set) var boards: [BoardKey: LeaderboardPage] = [:]
+    private(set) var boardErrors: [BoardKey: String] = [:]
+    private(set) var loadingBoards: Set<BoardKey> = []
 
     @ObservationIgnored private let deps: Deps
     @ObservationIgnored private weak var store: AppStore?
@@ -527,7 +790,7 @@ final class LeaderboardService {
     @ObservationIgnored private var session: LeaderboardSessionResponse?
     @ObservationIgnored private var signInTask: Task<Void, Never>?
     @ObservationIgnored private var uploadLoopTask: Task<Void, Never>?
-    @ObservationIgnored private var boardFetchedAt: [LeaderboardBoard: Date] = [:]
+    @ObservationIgnored private var boardFetchedAt: [BoardKey: Date] = [:]
     @ObservationIgnored private var usageDataLoaded = false
 
     init(store: AppStore, deps: Deps = .live) {
@@ -754,8 +1017,9 @@ final class LeaderboardService {
         clearSession()
     }
 
-    /// Privacy requirement: removes the user, sessions, monthly rows, and the
-    /// report log server-side, then forgets everything locally and opts out.
+    /// Privacy requirement: removes the user, sessions, weekly and monthly
+    /// rows, and the report log server-side, then forgets everything locally
+    /// and opts out.
     func deleteMyData() async throws {
         guard session != nil else { throw LeaderboardError.notSignedIn }
         isDeletingData = true
@@ -819,7 +1083,7 @@ final class LeaderboardService {
             lastReport = report
             lastReportFlagged = result.flagged ?? false
             if let rank = result.rank {
-                myRank = MyRank(month: rank.month, lifetime: rank.lifetime)
+                myRank = MyRank(rank)
             }
             let now = deps.now()
             lastUploadAt = now
@@ -833,22 +1097,38 @@ final class LeaderboardService {
         }
     }
 
-    /// Refreshes the month and lifetime all-provider payloads through the
-    /// store's normal quiet path, then reads both back from its cache.
+    /// Refreshes the month, 30-day and lifetime all-provider payloads through
+    /// the store's normal quiet path, then reads them back from its cache.
+    /// Month and lifetime are required; the week is summed from the 30-day
+    /// payload's per-day series (local Monday → today) and simply left out of
+    /// the report when that payload is unavailable, so a missing week never
+    /// blocks the upload.
     private func buildReport() async throws -> LeaderboardReport {
         guard let store else { throw LeaderboardError.usageDataUnavailable }
         async let monthLoaded = store.refreshQuietly(period: .month, qualityOfService: .utility)
+        async let thirtyDaysLoaded = store.refreshQuietly(period: .thirtyDays, qualityOfService: .utility)
         async let lifetimeLoaded = store.refreshQuietly(period: .lifetime, qualityOfService: .utility)
-        _ = await (monthLoaded, lifetimeLoaded)
+        _ = await (monthLoaded, thirtyDaysLoaded, lifetimeLoaded)
         guard let monthPayload = store.allProviderPayload(for: .month),
               let lifetimePayload = store.allProviderPayload(for: .lifetime) else {
             throw LeaderboardError.usageDataUnavailable
         }
         let now = deps.now()
+        let thirtyDayPayload = store.allProviderPayload(for: .thirtyDays)
+        let week = thirtyDayPayload.map { LeaderboardReportBuilder.weekTotals(from: $0, now: now) }
+        // The streak wants the longest per-day series on hand: lifetime
+        // (CLI caps it at 365 days) normally, the 30-day one as a fallback.
+        let lifetimeDaily = lifetimePayload.history.daily
+        let thirtyDaily = thirtyDayPayload?.history.daily ?? []
+        let activity = LeaderboardReportBuilder.activity(
+            from: lifetimeDaily.count >= thirtyDaily.count ? lifetimeDaily : thirtyDaily, now: now)
         return try LeaderboardReportBuilder.build(
             month: LeaderboardReportBuilder.totals(from: monthPayload),
             lifetime: LeaderboardReportBuilder.totals(from: lifetimePayload),
             monthKey: LeaderboardReportBuilder.monthKey(for: now),
+            week: week,
+            weekKey: week == nil ? nil : LeaderboardReportBuilder.weekKey(for: now),
+            activity: activity,
             appVersion: deps.appVersion(),
             reportedAt: now
         )
@@ -856,43 +1136,48 @@ final class LeaderboardService {
 
     // MARK: Boards
 
-    func loadBoard(_ board: LeaderboardBoard, force: Bool = false) async {
-        if !force, let fetchedAt = boardFetchedAt[board], boards[board] != nil,
+    /// The cached page for a board and metric, if any.
+    func page(_ board: LeaderboardBoard, metric: LeaderboardMetric = .default) -> LeaderboardPage? {
+        boards[BoardKey(board: board, metric: metric)]
+    }
+
+    func loadBoard(_ board: LeaderboardBoard, metric: LeaderboardMetric = .default, force: Bool = false) async {
+        let key = BoardKey(board: board, metric: metric)
+        if !force, let fetchedAt = boardFetchedAt[key], boards[key] != nil,
            deps.now().timeIntervalSince(fetchedAt) < Self.boardCacheTTL {
             return
         }
-        guard !loadingBoards.contains(board) else { return }
-        loadingBoards.insert(board)
-        defer { loadingBoards.remove(board) }
+        guard !loadingBoards.contains(key) else { return }
+        loadingBoards.insert(key)
+        defer { loadingBoards.remove(key) }
         do {
-            let page = try await fetchBoard(board, authenticated: session != nil)
-            boards[board] = page
-            boardErrors[board] = nil
-            boardFetchedAt[board] = deps.now()
+            let page = try await fetchBoard(board, metric: metric, authenticated: session != nil)
+            boards[key] = page
+            boardErrors[key] = nil
+            boardFetchedAt[key] = deps.now()
             if let me = page.me {
-                switch board {
-                case .month: myRank.month = me.rank
-                case .lifetime: myRank.lifetime = me.rank
-                }
+                myRank[metric][board] = me.rank
             }
         } catch LeaderboardError.unauthorized {
             // The session was cleared; the public board still renders.
-            if let page = try? await fetchBoard(board, authenticated: false) {
-                boards[board] = page
-                boardErrors[board] = nil
-                boardFetchedAt[board] = deps.now()
+            if let page = try? await fetchBoard(board, metric: metric, authenticated: false) {
+                boards[key] = page
+                boardErrors[key] = nil
+                boardFetchedAt[key] = deps.now()
             } else {
-                boardErrors[board] = LeaderboardError.unauthorized.localizedDescription
+                boardErrors[key] = LeaderboardError.unauthorized.localizedDescription
             }
         } catch {
-            boardErrors[board] = Self.message(for: error)
+            boardErrors[key] = Self.message(for: error)
         }
     }
 
-    private func fetchBoard(_ board: LeaderboardBoard, authenticated: Bool) async throws -> LeaderboardPage {
-        var query = "board=\(board.rawValue)&limit=\(Self.boardLimit)"
-        if board == .month {
-            query += "&month=\(LeaderboardReportBuilder.monthKey(for: deps.now()))"
+    private func fetchBoard(_ board: LeaderboardBoard, metric: LeaderboardMetric, authenticated: Bool) async throws -> LeaderboardPage {
+        var query = "board=\(board.rawValue)&metric=\(metric.rawValue)&limit=\(Self.boardLimit)"
+        switch board {
+        case .week: query += "&week=\(LeaderboardReportBuilder.weekKey(for: deps.now()))"
+        case .month: query += "&month=\(LeaderboardReportBuilder.monthKey(for: deps.now()))"
+        case .lifetime: break
         }
         let (data, response) = try await send(path: "/v1/leaderboard?\(query)", method: "GET", auth: authenticated)
         try Self.checkStatus(response, data: data)

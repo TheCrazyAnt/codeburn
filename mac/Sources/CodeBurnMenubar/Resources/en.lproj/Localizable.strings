@@ -346,6 +346,7 @@
 "Enter an amount above, or the alert stays off." = "Enter an amount above, or the alert stays off.";
 "Enter the required API or cloud credentials below, then press Save & Connect." = "Enter the required API or cloud credentials below, then press Save & Connect.";
 "Enter this code on GitHub to finish signing in:" = "Enter this code on GitHub to finish signing in:";
+"Enter this code on GitHub:" = "Enter this code on GitHub:";
 "Enterprise" = "Enterprise";
 "Euro" = "Euro";
 "Expires %@" = "Expires %@";
@@ -564,6 +565,7 @@
 "Optional, and only needed when nothing else on this Mac is signed in. A fine-grained personal access token with the \"Plan: Read-only\" permission is enough. The token is saved in CodeBurn's own Keychain item and is used only to read your Copilot quota." = "Optional, and only needed when nothing else on this Mac is signed in. A fine-grained personal access token with the \"Plan: Read-only\" permission is enough. The token is saved in CodeBurn's own Keychain item and is used only to read your Copilot quota.";
 "Orange" = "Orange";
 "Other" = "Other";
+"Output" = "Output";
 "Override with the `CodeBurnLeaderboardServer` default if you run your own instance." = "Override with the `CodeBurnLeaderboardServer` default if you run your own instance.";
 "Overrides are optional and are saved only when you press Save & Connect. Secret values use one CodeBurn-owned Keychain item for this provider; background reads suppress authentication UI." = "Overrides are optional and are saved only when you press Save & Connect. Secret values use one CodeBurn-owned Keychain item for this provider; background reads suppress authentication UI.";
 "Paid" = "Paid";
@@ -685,6 +687,7 @@
 "Sign in with Codex first: run `codex login` in your terminal. Then click Try Again." = "Sign in with Codex first: run `codex login` in your terminal. Then click Try Again.";
 "Sign in with GitHub" = "Sign in with GitHub";
 "Sign in with GitHub above to start uploading." = "Sign in with GitHub above to start uploading.";
+"Sign in with GitHub to appear here. Only your totals (spend, tokens, calls) are shared, never projects or prompts." = "Sign in with GitHub to appear here. Only your totals (spend, tokens, calls) are shared, never projects or prompts.";
 "Sign in with GitHub to be ranked. Only totals are shared." = "Sign in with GitHub to be ranked. Only totals are shared.";
 "Sign in with GitHub to join the leaderboard." = "Sign in with GitHub to join the leaderboard.";
 "Sign in with `codex` (ChatGPT mode) to track quota." = "Sign in with `codex` (ChatGPT mode) to track quota.";
@@ -698,6 +701,8 @@
 "Sign out" = "Sign out";
 "Sign out of the leaderboard?" = "Sign out of the leaderboard?";
 "Sign-in failed" = "Sign-in failed";
+"Sign-in failed: %@" = "Sign-in failed: %@";
+"Signed in as %@. Sharing is off." = "Signed in as %@. Sharing is off.";
 "Signed in with GitHub" = "Signed in with GitHub";
 "Signing in…" = "Signing in…";
 "Singapore Dollar" = "Singapore Dollar";
@@ -709,6 +714,7 @@
 "Source: Z.ai Coding Plan" = "Source: Z.ai Coding Plan";
 "South African Rand" = "South African Rand";
 "South Korean Won" = "South Korean Won";
+"Spend" = "Spend";
 "Spend down %lld%% vs last 7 days" = "Spend down %lld%% vs last 7 days";
 "Spend down \(Int(abs(delta)))% vs last 7 days" = "Spend down \(Int(abs(delta)))% vs last 7 days";
 "Spend split per provider (Claude, Codex, Cursor, …)" = "Spend split per provider (Claude, Codex, Cursor, …)";
@@ -757,6 +763,7 @@
 "This month" = "This month";
 "This removes you from the public leaderboard immediately. Your local CodeBurn data is untouched." = "This removes you from the public leaderboard immediately. Your local CodeBurn data is untouched.";
 "This total may be incomplete." = "This total may be incomplete.";
+"This week" = "This week";
 "Tips for you" = "Tips for you";
 "Today" = "Today";
 "Today · %@ · %@" = "Today · %@ · %@";
@@ -843,6 +850,7 @@
 "Z.ai returned an unrecognized quota response." = "Z.ai returned an unrecognized quota response.";
 "\(Int((snapshot.scale * 100).rounded()))%" = "\(Int((snapshot.scale * 100).rounded()))%";
 "\(Int((totalWaste / cost * 100).rounded()))% of spend" = "\(Int((totalWaste / cost * 100).rounded()))% of spend";
+"\(Int(value.rounded())) days" = "\(Int(value.rounded())) days";
 "\(String(format: " = "\(String(format: ";
 "\(delta >= 0 ? " = "\(delta >= 0 ? ";
 "\(formatTokensCompact(Double(m.totalTokens))) tok" = "\(formatTokensCompact(Double(m.totalTokens))) tok";

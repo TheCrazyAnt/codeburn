@@ -3,6 +3,8 @@
 // Every rule mirrors API.md ("Server rules") exactly.
 
 export const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
+/** ISO 8601 week key, YYYY-Www (W01..W53). */
+export const WEEK_RE = /^\d{4}-W(0[1-9]|[1-4]\d|5[0-3])$/;
 export const PROVIDER_ID_RE = /^[A-Za-z0-9_.-]{1,32}$/;
 export const MAX_PROVIDERS = 32;
 export const MAX_APP_VERSION_LEN = 64;
@@ -19,11 +21,36 @@ export const GROWTH_SLACK_USD = 500;
 /** cost-per-token sanity window, USD per 1M tokens. */
 export const MIN_USD_PER_MTOK = 0.02;
 export const MAX_USD_PER_MTOK = 300;
+/** streakDays upper bound (~10 years). */
+export const MAX_STREAK_DAYS = 3660;
+
+/** What a board ranks by. Stable API identifiers. */
+export const METRICS = ["usd", "output", "streak"] as const;
+export type Metric = (typeof METRICS)[number];
+export const DEFAULT_METRIC: Metric = "output";
+
+export function isMetric(v: string): v is Metric {
+  return (METRICS as readonly string[]).includes(v);
+}
 
 export interface ProviderSplit {
   id: string;
   monthUSD: number;
   lifetimeUSD: number;
+}
+
+/**
+ * Optional calendar-week slice: the client's local Monday 00:00 → now, keyed
+ * as an ISO week. A calendar week can straddle two months, so weekUSD is NOT
+ * bounded by monthUSD — only by lifetimeUSD.
+ */
+export interface WeekSlice {
+  week: string;
+  weekUSD: number;
+  weekTokens: number;
+  weekCalls: number;
+  /** Model output tokens in the week; null when the client did not send it. */
+  weekOutputTokens: number | null;
 }
 
 export interface ReportInput {
@@ -34,6 +61,15 @@ export interface ReportInput {
   lifetimeUSD: number;
   lifetimeTokens: number;
   lifetimeCalls: number;
+  /** null when the client sent no week fields (older clients). */
+  week: WeekSlice | null;
+  /** Model output tokens per period; null when not sent (older clients). */
+  monthOutputTokens: number | null;
+  lifetimeOutputTokens: number | null;
+  /** Consecutive active days up to today (or yesterday); null when not sent. */
+  streakDays: number | null;
+  /** Distinct active days ever; null when not sent. */
+  activeDays: number | null;
   byProvider: ProviderSplit[];
   appVersion: string;
   reportedAt: string;
@@ -72,6 +108,31 @@ export function allowedMonths(nowMs: number): Set<string> {
   return new Set([fmt(y, m - 1), fmt(y, m), fmt(y, m + 1)]);
 }
 
+const DAY_MS = 86_400_000;
+
+/** ISO 8601 week ("YYYY-Www") of a timestamp in UTC. Weeks start Monday; week 1 holds January 4. */
+export function utcIsoWeek(ms: number): string {
+  const d = new Date(ms);
+  const day = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  const dow = (new Date(day).getUTCDay() + 6) % 7; // Monday = 0
+  // The ISO year/week of a date are those of the Thursday in its week.
+  const thursday = day + (3 - dow) * DAY_MS;
+  const isoYear = new Date(thursday).getUTCFullYear();
+  const jan4 = Date.UTC(isoYear, 0, 4);
+  const jan4dow = (new Date(jan4).getUTCDay() + 6) % 7;
+  const week1Thursday = jan4 + (3 - jan4dow) * DAY_MS;
+  const week = 1 + Math.round((thursday - week1Thursday) / (7 * DAY_MS));
+  return `${isoYear}-W${String(week).padStart(2, "0")}`;
+}
+
+/**
+ * Weeks a client may report for: the current UTC ISO week and its neighbours
+ * (the client uses *local* time, which can sit on the other side of a Monday).
+ */
+export function allowedWeeks(nowMs: number): Set<string> {
+  return new Set([utcIsoWeek(nowMs - 7 * DAY_MS), utcIsoWeek(nowMs), utcIsoWeek(nowMs + 7 * DAY_MS)]);
+}
+
 /** Structural validation → 400-class problems. Does not apply plausibility rules. */
 export function validateReport(body: unknown, nowMs: number): ValidationResult {
   if (!isRecord(body)) return { ok: false, message: "body must be a JSON object" };
@@ -106,6 +167,65 @@ export function validateReport(body: unknown, nowMs: number): ValidationResult {
       return { ok: false, message: `${f} must be a finite number >= 0` };
     }
     nums[f] = v;
+  }
+
+  // Week slice: all four fields present, or all absent (undefined/null).
+  const weekFields = ["week", "weekUSD", "weekTokens", "weekCalls"] as const;
+  const weekPresent = weekFields.filter((f) => body[f] !== undefined && body[f] !== null);
+  let week: WeekSlice | null = null;
+  if (weekPresent.length > 0) {
+    if (weekPresent.length !== weekFields.length) {
+      return { ok: false, message: "week, weekUSD, weekTokens and weekCalls must be sent together (or all omitted)" };
+    }
+    const weekKey = body.week;
+    if (typeof weekKey !== "string" || !WEEK_RE.test(weekKey)) {
+      return { ok: false, message: "week must be a string formatted YYYY-Www (ISO week)" };
+    }
+    if (!allowedWeeks(nowMs).has(weekKey)) {
+      return { ok: false, message: `week ${weekKey} is not the current week (±1 week tolerance)` };
+    }
+    for (const f of ["weekUSD", "weekTokens", "weekCalls"] as const) {
+      if (!nonNegativeFinite(body[f])) {
+        return { ok: false, message: `${f} must be a finite number >= 0` };
+      }
+    }
+    week = {
+      week: weekKey,
+      weekUSD: body.weekUSD as number,
+      weekTokens: Math.round(body.weekTokens as number),
+      weekCalls: Math.round(body.weekCalls as number),
+      weekOutputTokens: null,
+    };
+  }
+
+  // Metric fields: optional, but each must be a finite non-negative number when present.
+  const optionalCount = (f: string): { ok: true; value: number | null } | { ok: false; message: string } => {
+    const v = body[f];
+    if (v === undefined || v === null) return { ok: true, value: null };
+    if (!nonNegativeFinite(v)) return { ok: false, message: `${f} must be a finite number >= 0` };
+    return { ok: true, value: Math.round(v) };
+  };
+  const optional: Record<"weekOutputTokens" | "monthOutputTokens" | "lifetimeOutputTokens" | "streakDays" | "activeDays", number | null> = {
+    weekOutputTokens: null,
+    monthOutputTokens: null,
+    lifetimeOutputTokens: null,
+    streakDays: null,
+    activeDays: null,
+  };
+  for (const f of Object.keys(optional) as (keyof typeof optional)[]) {
+    const r = optionalCount(f);
+    if (!r.ok) return r;
+    optional[f] = r.value;
+  }
+  if (optional.weekOutputTokens !== null) {
+    if (week === null) return { ok: false, message: "weekOutputTokens requires the week fields" };
+    week.weekOutputTokens = optional.weekOutputTokens;
+  }
+  if (optional.streakDays !== null && optional.streakDays > MAX_STREAK_DAYS) {
+    return { ok: false, message: `streakDays must be at most ${MAX_STREAK_DAYS}` };
+  }
+  if (optional.activeDays !== null && optional.streakDays !== null && optional.activeDays < optional.streakDays) {
+    return { ok: false, message: "activeDays must be at least streakDays" };
   }
 
   const byProvider: ProviderSplit[] = [];
@@ -155,6 +275,11 @@ export function validateReport(body: unknown, nowMs: number): ValidationResult {
       lifetimeUSD: nums.lifetimeUSD,
       lifetimeTokens: Math.round(nums.lifetimeTokens),
       lifetimeCalls: Math.round(nums.lifetimeCalls),
+      week,
+      monthOutputTokens: optional.monthOutputTokens,
+      lifetimeOutputTokens: optional.lifetimeOutputTokens,
+      streakDays: optional.streakDays,
+      activeDays: optional.activeDays,
       byProvider,
       appVersion,
       reportedAt,
@@ -166,6 +291,9 @@ export function validateReport(body: unknown, nowMs: number): ValidationResult {
 export interface PreviousState {
   lifetimeUsd: number;
   lastReportAtMs: number;
+  /** Stored streak / active days (0 when never reported). */
+  streakDays?: number;
+  activeDays?: number;
 }
 
 export type Evaluation =
@@ -191,6 +319,31 @@ export function evaluateReport(
       message: `monthTokens (${report.monthTokens}) exceeds lifetimeTokens (${report.lifetimeTokens})`,
     };
   }
+  // A calendar week may straddle two months, so the week is bounded by
+  // lifetime only (same 1% tolerance), never by the month.
+  if (report.week && report.week.weekUSD > report.lifetimeUSD * MONTH_VS_LIFETIME_TOLERANCE) {
+    return {
+      verdict: "reject",
+      message: `weekUSD (${report.week.weekUSD}) exceeds lifetimeUSD (${report.lifetimeUSD}) by more than 1%`,
+    };
+  }
+  if (report.week && report.week.weekTokens > report.lifetimeTokens) {
+    return {
+      verdict: "reject",
+      message: `weekTokens (${report.week.weekTokens}) exceeds lifetimeTokens (${report.lifetimeTokens})`,
+    };
+  }
+  // Output tokens are a subset of the period's total tokens.
+  const outputChecks: Array<[string, number | null, string, number]> = [
+    ["monthOutputTokens", report.monthOutputTokens, "monthTokens", report.monthTokens],
+    ["lifetimeOutputTokens", report.lifetimeOutputTokens, "lifetimeTokens", report.lifetimeTokens],
+    ["weekOutputTokens", report.week?.weekOutputTokens ?? null, "weekTokens", report.week?.weekTokens ?? 0],
+  ];
+  for (const [name, output, totalName, total] of outputChecks) {
+    if (output !== null && output > total) {
+      return { verdict: "reject", message: `${name} (${output}) exceeds ${totalName} (${total})` };
+    }
+  }
   if (previous && report.lifetimeUSD < previous.lifetimeUsd * LIFETIME_DROP_TOLERANCE) {
     return {
       verdict: "reject",
@@ -207,6 +360,18 @@ export function evaluateReport(
     const delta = report.lifetimeUSD - previous.lifetimeUsd;
     if (delta > cap) {
       reasons.push(`growth_cap: +${delta.toFixed(2)} USD in ${hours.toFixed(1)}h exceeds ${cap.toFixed(2)} USD`);
+    }
+    // Days can only accrue one per calendar day: the streak / active-day
+    // counters may grow by at most (whole days elapsed + 1) between reports.
+    const maxDayGain = Math.floor(hours / 24) + 1;
+    const dayChecks: Array<[string, number | null, number]> = [
+      ["streak_growth", report.streakDays, previous.streakDays ?? 0],
+      ["active_days_growth", report.activeDays, previous.activeDays ?? 0],
+    ];
+    for (const [name, value, before] of dayChecks) {
+      if (value !== null && value - before > maxDayGain) {
+        reasons.push(`${name}: ${before} → ${value} in ${hours.toFixed(1)}h exceeds +${maxDayGain} days`);
+      }
     }
   }
 

@@ -18,7 +18,8 @@ struct LeaderboardTests {
         cacheRead: Int? = nil,
         cacheWrite: Int? = nil,
         providerDetails: String = "[]",
-        providers: String = "{}"
+        providers: String = "{}",
+        daily: String = "[]"
     ) -> Data {
         var current = """
         "label": "Month", "cost": \(cost), "calls": \(calls), "sessions": 3,
@@ -32,9 +33,33 @@ struct LeaderboardTests {
           "generated": "2026-09-03T04:00:00Z",
           "current": { \(current) },
           "optimize": { "findingCount": 0, "savingsUSD": 0, "topFindings": [] },
-          "history": { "daily": [] }
+          "history": { "daily": \(daily) }
         }
         """.data(using: .utf8)!
+    }
+
+    /// One `history.daily` row as the CLI emits it (local `yyyy-MM-dd` key).
+    private static func dailyJSON(
+        _ date: String, cost: Double, calls: Int,
+        input: Int, output: Int, cacheRead: Int, cacheWrite: Int
+    ) -> String {
+        """
+        {"date":"\(date)","cost":\(cost),"savingsUSD":0,"calls":\(calls),"inputTokens":\(input),"outputTokens":\(output),"cacheReadTokens":\(cacheRead),"cacheWriteTokens":\(cacheWrite)}
+        """
+    }
+
+    private static func utc(_ iso: String) -> Date {
+        ISO8601DateFormatter().date(from: iso)!
+    }
+
+    /// Gregorian calendar in `zone` with a Sunday-first week (the en_US
+    /// default), so the tests prove the builder imposes ISO Monday weeks.
+    private static func calendar(_ zone: String) -> Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: zone)!
+        calendar.firstWeekday = 1
+        calendar.minimumDaysInFirstWeek = 1
+        return calendar
     }
 
     private static func decode(_ data: Data) throws -> MenubarPayload {
@@ -55,6 +80,7 @@ struct LeaderboardTests {
         #expect(totals.usd == 5849.91)
         #expect(totals.calls == 4173)
         #expect(totals.tokens == 166_300_000)
+        #expect(totals.outputTokens == 6_300_000)
         #expect(totals.providers.isEmpty)
     }
 
@@ -146,8 +172,10 @@ struct LeaderboardTests {
 
         let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(report)) as? [String: Any]
         let keys = try #require(json).keys.sorted()
-        #expect(keys == ["appVersion", "lifetimeCalls", "lifetimeTokens", "lifetimeUSD",
-                         "month", "monthCalls", "monthTokens", "monthUSD", "reportedAt"])
+        #expect(keys == ["activeDays", "appVersion", "lifetimeCalls", "lifetimeOutputTokens", "lifetimeTokens", "lifetimeUSD",
+                         "month", "monthCalls", "monthOutputTokens", "monthTokens", "monthUSD", "reportedAt", "streakDays"])
+        #expect(report.monthOutputTokens == 0 && report.lifetimeOutputTokens == 0)
+        #expect(report.streakDays == 0 && report.activeDays == 0)
     }
 
     @Test("rejects non-finite and negative numbers")
@@ -183,6 +211,216 @@ struct LeaderboardTests {
         var utc = Calendar(identifier: .gregorian)
         utc.timeZone = TimeZone(secondsFromGMT: 0)!
         #expect(LeaderboardReportBuilder.monthKey(for: date, calendar: utc) == "2026-08")
+    }
+
+    // MARK: Week (local ISO calendar week)
+
+    @Test("week key is the local ISO week as YYYY-Www")
+    func weekKey() {
+        let shanghai = Self.calendar("Asia/Shanghai")
+        // Thursday 2026-09-03 12:00 CST
+        #expect(LeaderboardReportBuilder.weekKey(for: Self.utc("2026-09-03T04:00:00Z"), calendar: shanghai) == "2026-W36")
+        // Sunday still belongs to the Monday-start week (a Sunday-first calendar would say W37)
+        #expect(LeaderboardReportBuilder.weekKey(for: Self.utc("2026-09-06T04:00:00Z"), calendar: shanghai) == "2026-W36")
+        // Sunday 20:00 UTC is already Monday 04:00 in Shanghai.
+        #expect(LeaderboardReportBuilder.weekKey(for: Self.utc("2026-09-06T20:00:00Z"), calendar: shanghai) == "2026-W37")
+        #expect(LeaderboardReportBuilder.weekKey(for: Self.utc("2026-09-06T20:00:00Z"), calendar: Self.calendar("UTC")) == "2026-W36")
+    }
+
+    @Test("week key follows the ISO year-boundary rules")
+    func weekKeyYearBoundary() {
+        let utc = Self.calendar("UTC")
+        func key(_ iso: String) -> String { LeaderboardReportBuilder.weekKey(for: Self.utc(iso), calendar: utc) }
+        #expect(key("2027-01-01T12:00:00Z") == "2026-W53") // Friday; 2026 has 53 ISO weeks
+        #expect(key("2027-01-03T12:00:00Z") == "2026-W53") // Sunday
+        #expect(key("2027-01-04T12:00:00Z") == "2027-W01") // Monday
+        #expect(key("2024-12-30T12:00:00Z") == "2025-W01") // Monday before New Year belongs to the new ISO year
+        #expect(key("2021-01-03T12:00:00Z") == "2020-W53")
+        #expect(key("2021-01-04T12:00:00Z") == "2021-W01")
+    }
+
+    @Test("week starts on the local Monday at 00:00")
+    func weekStart() {
+        let shanghai = Self.calendar("Asia/Shanghai")
+        let monday = Self.utc("2026-08-30T16:00:00Z") // 2026-08-31 00:00 CST
+        #expect(LeaderboardReportBuilder.weekStart(for: Self.utc("2026-09-03T04:00:00Z"), calendar: shanghai) == monday) // Thursday
+        #expect(LeaderboardReportBuilder.weekStart(for: Self.utc("2026-09-06T04:00:00Z"), calendar: shanghai) == monday) // Sunday
+        #expect(LeaderboardReportBuilder.weekStart(for: Self.utc("2026-08-30T16:30:00Z"), calendar: shanghai) == monday) // Monday 00:30
+        #expect(LeaderboardReportBuilder.weekStart(for: Self.utc("2026-08-30T15:30:00Z"), calendar: shanghai)
+                == Self.utc("2026-08-23T16:00:00Z")) // Sunday 23:30: previous week
+        #expect(LeaderboardReportBuilder.dayKey(monday, calendar: shanghai) == "2026-08-31")
+        #expect(LeaderboardReportBuilder.dayKey(monday, calendar: Self.calendar("UTC")) == "2026-08-30")
+    }
+
+    @Test("week totals sum the daily series from Monday through today, cache tokens included")
+    func weekTotals() throws {
+        let daily = "[" + [
+            Self.dailyJSON("2026-08-29", cost: 50, calls: 5, input: 100, output: 10, cacheRead: 1, cacheWrite: 1),  // Saturday, last week
+            Self.dailyJSON("2026-08-30", cost: 10, calls: 1, input: 100, output: 10, cacheRead: 1, cacheWrite: 1),  // Sunday, last week
+            Self.dailyJSON("2026-08-31", cost: 1.5, calls: 3, input: 1_000, output: 100, cacheRead: 5_000, cacheWrite: 200), // Monday
+            Self.dailyJSON("2026-09-02", cost: 2.25, calls: 4, input: 2_000, output: 200, cacheRead: 6_000, cacheWrite: 300),
+            Self.dailyJSON("2026-09-03", cost: 4, calls: 5, input: 3_000, output: 300, cacheRead: 7_000, cacheWrite: 400),   // today
+            Self.dailyJSON("2026-09-04", cost: 100, calls: 9, input: 9, output: 9, cacheRead: 9, cacheWrite: 9),   // tomorrow, ignored
+        ].joined(separator: ",") + "]"
+        // `current` is the 30-day block and must not leak into the week.
+        let payload = try Self.decode(Self.payloadJSON(cost: 999, calls: 999, input: 1, output: 1, daily: daily))
+        let totals = LeaderboardReportBuilder.weekTotals(
+            from: payload, now: Self.utc("2026-09-03T04:00:00Z"), calendar: Self.calendar("Asia/Shanghai"))
+
+        #expect(totals.usd == 7.75)
+        #expect(totals.calls == 12)
+        #expect(totals.tokens == 6_000 + 600 + 18_000 + 900)
+        #expect(totals.outputTokens == 600)
+        #expect(totals.providers.isEmpty)
+
+        // Monday itself: only that day counts.
+        let mondayOnly = LeaderboardReportBuilder.weekTotals(
+            from: payload, now: Self.utc("2026-08-30T17:00:00Z"), calendar: Self.calendar("Asia/Shanghai"))
+        #expect(mondayOnly.usd == 1.5 && mondayOnly.calls == 3)
+
+        // An empty series is a zero week, not an error.
+        let empty = try Self.decode(Self.payloadJSON(cost: 5, calls: 1, input: 1, output: 1))
+        #expect(LeaderboardReportBuilder.weekTotals(from: empty, now: Self.reportedAt) == .init(usd: 0, tokens: 0, calls: 0))
+    }
+
+    @Test("report carries the week slice, lifts lifetime above it, and validates it")
+    func buildsReportWithWeek() throws {
+        let report = try LeaderboardReportBuilder.build(
+            month: .init(usd: 100, tokens: 1_000, calls: 10),
+            lifetime: .init(usd: 118, tokens: 1_900, calls: 29),
+            monthKey: "2026-09",
+            week: .init(usd: 120, tokens: 2_000, calls: 30), // a week straddling the month boundary
+            weekKey: "2026-W36",
+            appVersion: "dev", reportedAt: Self.reportedAt)
+
+        #expect(report.week == "2026-W36")
+        #expect(report.weekUSD == 120)
+        #expect(report.weekTokens == 2_000)
+        #expect(report.weekCalls == 30)
+        #expect(report.monthUSD == 100, "the month is never lifted to the week")
+        #expect(report.lifetimeUSD == 120)
+        #expect(report.lifetimeTokens == 2_000)
+        #expect(report.lifetimeCalls == 30)
+
+        let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(report)) as? [String: Any]
+        let keys = try #require(json).keys.sorted()
+        #expect(keys == ["activeDays", "appVersion", "lifetimeCalls", "lifetimeOutputTokens", "lifetimeTokens", "lifetimeUSD",
+                         "month", "monthCalls", "monthOutputTokens", "monthTokens", "monthUSD", "reportedAt", "streakDays",
+                         "week", "weekCalls", "weekOutputTokens", "weekTokens", "weekUSD"])
+
+        // Totals without a key (or vice versa) ship no week at all.
+        let keyless = try LeaderboardReportBuilder.build(
+            month: .init(usd: 1, tokens: 1, calls: 1), lifetime: .init(usd: 2, tokens: 2, calls: 2),
+            monthKey: "2026-09", week: .init(usd: 1, tokens: 1, calls: 1), weekKey: nil,
+            appVersion: "dev", reportedAt: Self.reportedAt)
+        #expect(keyless.week == nil && keyless.weekUSD == nil && keyless.weekTokens == nil && keyless.weekCalls == nil)
+
+        #expect(throws: LeaderboardReportBuilder.BuildError.negative("weekUSD")) {
+            try LeaderboardReportBuilder.build(
+                month: .init(usd: 0, tokens: 0, calls: 0), lifetime: .init(usd: 0, tokens: 0, calls: 0),
+                monthKey: "2026-09", week: .init(usd: -1, tokens: 0, calls: 0), weekKey: "2026-W36",
+                appVersion: "dev", reportedAt: Self.reportedAt)
+        }
+        #expect(throws: LeaderboardReportBuilder.BuildError.notFinite("weekUSD")) {
+            try LeaderboardReportBuilder.build(
+                month: .init(usd: 0, tokens: 0, calls: 0), lifetime: .init(usd: 0, tokens: 0, calls: 0),
+                monthKey: "2026-09", week: .init(usd: .infinity, tokens: 0, calls: 0), weekKey: "2026-W36",
+                appVersion: "dev", reportedAt: Self.reportedAt)
+        }
+    }
+
+    // MARK: Streak / activity
+
+    private static func activityDaily(_ days: [(String, Int)]) -> [DailyHistoryEntry] {
+        let json = "[" + days.map { Self.dailyJSON($0.0, cost: 1, calls: $0.1, input: 10, output: 5, cacheRead: 0, cacheWrite: 0) }
+            .joined(separator: ",") + "]"
+        return (try? Self.decode(Self.payloadJSON(cost: 1, calls: 1, input: 1, output: 1, daily: json)))?.history.daily ?? []
+    }
+
+    @Test("streak counts consecutive active days ending today")
+    func streakEndingToday() {
+        let daily = Self.activityDaily([("2026-08-30", 2), ("2026-08-31", 1), ("2026-09-01", 4), ("2026-09-02", 1), ("2026-09-03", 3)])
+        let activity = LeaderboardReportBuilder.activity(
+            from: daily, now: Self.utc("2026-09-03T04:00:00Z"), calendar: Self.calendar("Asia/Shanghai"))
+        #expect(activity == .init(streakDays: 5, activeDays: 5))
+    }
+
+    @Test("a gap breaks the streak; a zero-call day is neither active nor part of it")
+    func streakGap() {
+        let daily = Self.activityDaily([("2026-08-28", 1), ("2026-08-29", 1), ("2026-08-30", 0), ("2026-08-31", 1), ("2026-09-01", 1), ("2026-09-02", 1), ("2026-09-03", 1)])
+        let activity = LeaderboardReportBuilder.activity(
+            from: daily, now: Self.utc("2026-09-03T04:00:00Z"), calendar: Self.calendar("Asia/Shanghai"))
+        #expect(activity.streakDays == 4)
+        #expect(activity.activeDays == 6)
+    }
+
+    @Test("today without calls yet keeps yesterday's streak alive; two idle days end it")
+    func streakTodayIdle() {
+        let calendar = Self.calendar("Asia/Shanghai")
+        let daily = Self.activityDaily([("2026-08-31", 1), ("2026-09-01", 1), ("2026-09-02", 1)])
+        // Thursday 09-03 with nothing logged yet → the run ending Wednesday still counts.
+        #expect(LeaderboardReportBuilder.activity(from: daily, now: Self.utc("2026-09-03T04:00:00Z"), calendar: calendar).streakDays == 3)
+        // Friday 09-04: Thursday was idle, so the streak is over.
+        #expect(LeaderboardReportBuilder.activity(from: daily, now: Self.utc("2026-09-04T04:00:00Z"), calendar: calendar).streakDays == 0)
+        // Sunday 20:00 UTC is Monday in Shanghai but still Sunday in UTC: the day key follows the calendar.
+        let sundayUTC = Self.activityDaily([("2026-09-06", 1)])
+        #expect(LeaderboardReportBuilder.activity(from: sundayUTC, now: Self.utc("2026-09-06T20:00:00Z"), calendar: Self.calendar("UTC")).streakDays == 1)
+        #expect(LeaderboardReportBuilder.activity(from: sundayUTC, now: Self.utc("2026-09-06T20:00:00Z"), calendar: calendar).streakDays == 1)
+    }
+
+    @Test("a series shorter than the true streak caps it at the series length; empty series is zero")
+    func streakCappedBySeries() {
+        let calendar = Self.calendar("Asia/Shanghai")
+        let short = Self.activityDaily([("2026-09-01", 1), ("2026-09-02", 1), ("2026-09-03", 1)])
+        #expect(LeaderboardReportBuilder.activity(from: short, now: Self.utc("2026-09-03T04:00:00Z"), calendar: calendar) == .init(streakDays: 3, activeDays: 3))
+        #expect(LeaderboardReportBuilder.activity(from: [], now: Self.utc("2026-09-03T04:00:00Z"), calendar: calendar) == .none)
+    }
+
+    @Test("report carries output tokens per period and the activity, lifting lifetime output and active days")
+    func buildsReportWithMetrics() throws {
+        let report = try LeaderboardReportBuilder.build(
+            month: .init(usd: 100, tokens: 1_000, calls: 10, outputTokens: 300),
+            lifetime: .init(usd: 118, tokens: 1_900, calls: 29, outputTokens: 250), // raced: below the month
+            monthKey: "2026-09",
+            week: .init(usd: 20, tokens: 500, calls: 5, outputTokens: 120),
+            weekKey: "2026-W36",
+            activity: .init(streakDays: 12, activeDays: 9), // impossible: lifted
+            appVersion: "dev", reportedAt: Self.reportedAt)
+        #expect(report.monthOutputTokens == 300)
+        #expect(report.weekOutputTokens == 120)
+        #expect(report.lifetimeOutputTokens == 300)
+        #expect(report.streakDays == 12)
+        #expect(report.activeDays == 12)
+
+        #expect(throws: LeaderboardReportBuilder.BuildError.negative("streakDays")) {
+            try LeaderboardReportBuilder.build(
+                month: .init(usd: 0, tokens: 0, calls: 0), lifetime: .init(usd: 0, tokens: 0, calls: 0),
+                monthKey: "2026-09", activity: .init(streakDays: -1, activeDays: 0),
+                appVersion: "dev", reportedAt: Self.reportedAt)
+        }
+        #expect(throws: LeaderboardReportBuilder.BuildError.negative("monthOutputTokens")) {
+            try LeaderboardReportBuilder.build(
+                month: .init(usd: 0, tokens: 0, calls: 0, outputTokens: -1), lifetime: .init(usd: 0, tokens: 0, calls: 0),
+                monthKey: "2026-09", appVersion: "dev", reportedAt: Self.reportedAt)
+        }
+    }
+
+    @Test("metrics are output, usd, streak with output as the default")
+    @MainActor
+    func metricOrderAndFormat() {
+        #expect(LeaderboardMetric.allCases == [.output, .usd, .streak])
+        #expect(LeaderboardMetric.allCases.map(\.rawValue) == ["output", "usd", "streak"])
+        #expect(LeaderboardMetric.default == .output)
+        #expect(LeaderboardMetric.output.format(1_234_567) == "1.2M")
+        #expect(LeaderboardMetric.output.format(340_000) == "340K")
+        #expect(LeaderboardMetric.streak.format(7) == L("\(7) days"))
+        #expect(LeaderboardMetric.usd.format(12.5).hasSuffix("12.50") || LeaderboardMetric.usd.format(12.5).contains("."))
+    }
+
+    @Test("boards are week, month, lifetime in that order")
+    func boardOrder() {
+        #expect(LeaderboardBoard.allCases == [.week, .month, .lifetime])
+        #expect(LeaderboardBoard.allCases.map(\.rawValue) == ["week", "month", "lifetime"])
     }
 
     // MARK: Device flow
@@ -265,6 +503,7 @@ struct LeaderboardTests {
 
         #expect(page.board == "month")
         #expect(page.month == "2026-09")
+        #expect(page.week == nil)
         #expect(page.totalUsers == 120)
         #expect(page.entries.count == 2)
         #expect(page.entries[0].login == "octocat")
@@ -283,12 +522,43 @@ struct LeaderboardTests {
         """.utf8))
         #expect(page.me == nil && page.entries.isEmpty)
 
+        let weekPage = try JSONDecoder().decode(LeaderboardPage.self, from: Data("""
+        { "board": "week", "week": "2026-W36", "updatedAt": "2026-09-03T04:00:00Z", "totalUsers": 2,
+          "entries": [ { "rank": 1, "login": "hubot", "avatarUrl": null, "usd": 400, "tokens": 8000000, "calls": 300, "topProvider": "claude" } ],
+          "me": { "rank": 2, "usd": 150, "tokens": 5000000, "calls": 120, "flagged": false } }
+        """.utf8))
+        #expect(weekPage.board == "week")
+        #expect(weekPage.week == "2026-W36")
+        #expect(weekPage.month == nil)
+        #expect(weekPage.metric == nil, "pre-metric servers send no metric")
+        #expect(weekPage.entries.first?.login == "hubot")
+        #expect(weekPage.me?.rank == 2)
+
+        let metricPage = try JSONDecoder().decode(LeaderboardPage.self, from: Data("""
+        { "board": "month", "metric": "streak", "month": "2026-09", "updatedAt": "x", "totalUsers": 3,
+          "entries": [ { "rank": 1, "login": "hubot", "avatarUrl": null, "usd": 500, "tokens": 20000000,
+                         "outputTokens": 9000000, "streakDays": 7, "calls": 900, "topProvider": "claude", "value": 7 } ],
+          "me": { "rank": 3, "usd": 900, "tokens": 20000000, "outputTokens": 1000000, "streakDays": 3, "calls": 900, "value": 3, "flagged": false } }
+        """.utf8))
+        #expect(metricPage.metric == "streak")
+        let top = try #require(metricPage.entries.first)
+        #expect(top.value == 7 && top.outputTokens == 9_000_000 && top.streakDays == 7)
+        #expect(top.metricValue(.streak) == 7 && top.metricValue(.output) == 9_000_000 && top.metricValue(.usd) == 500)
+        let me = try #require(metricPage.me)
+        #expect(me.value == 3 && me.metricValue(.output) == 1_000_000 && me.streakDays == 3)
+
         let config = try JSONDecoder().decode(LeaderboardConfig.self, from: Data("""
-        { "githubClientId": "Iv1.x", "uploadIntervalMinutes": 10, "minAppVersion": "0.9.23", "board": { "month": "2026-09" } }
+        { "githubClientId": "Iv1.x", "uploadIntervalMinutes": 10, "minAppVersion": "0.9.23", "board": { "week": "2026-W36", "month": "2026-09" } }
         """.utf8))
         #expect(config.githubClientId == "Iv1.x")
         #expect(config.effectiveUploadInterval == 30 * 60, "interval floor is 30 minutes")
         #expect(config.board?.month == "2026-09")
+        #expect(config.board?.week == "2026-W36")
+
+        let legacyConfig = try JSONDecoder().decode(LeaderboardConfig.self, from: Data("""
+        { "githubClientId": "Iv1.x", "board": { "month": "2026-09" } }
+        """.utf8))
+        #expect(legacyConfig.board?.week == nil, "older servers send no week")
 
         let session = try JSONDecoder().decode(LeaderboardSessionResponse.self, from: Data("""
         { "sessionToken": "abc", "user": { "id": 123, "login": "octocat", "avatarUrl": "https://a" } }
@@ -300,6 +570,35 @@ struct LeaderboardTests {
         """.utf8))
         #expect(result.ok && result.flagged == false)
         #expect(result.rank?.month == 12 && result.rank?.lifetime == 8)
+        #expect(result.rank?.week == nil, "rank.week absent or null when no week was reported")
+
+        let withWeek = try JSONDecoder().decode(LeaderboardReportResponse.self, from: Data("""
+        { "ok": true, "flagged": false, "rank": { "week": 3, "month": 12, "lifetime": 8 } }
+        """.utf8))
+        #expect(withWeek.rank?.week == 3)
+        let nullWeek = try JSONDecoder().decode(LeaderboardReportResponse.self, from: Data("""
+        { "ok": true, "flagged": false, "rank": { "week": null, "month": 12, "lifetime": 8 } }
+        """.utf8))
+        #expect(nullWeek.rank?.week == nil && nullWeek.rank?.month == 12)
+
+        // Legacy flat ranks are the spend ranks; the other metrics stay unknown.
+        let legacy = LeaderboardService.MyRank(try #require(withWeek.rank))
+        #expect(legacy.rank(.usd, .week) == 3 && legacy.rank(.usd, .month) == 12 && legacy.rank(.usd, .lifetime) == 8)
+        #expect(legacy.rank(.output, .month) == nil && legacy.rank(.streak, .lifetime) == nil)
+
+        let perMetric = try JSONDecoder().decode(LeaderboardReportResponse.self, from: Data("""
+        { "ok": true, "flagged": false, "rank": {
+            "week": 3, "month": 12, "lifetime": 8,
+            "usd": { "week": 3, "month": 12, "lifetime": 8 },
+            "output": { "week": 1, "month": 2, "lifetime": 4 },
+            "streak": { "week": null, "month": 5, "lifetime": 5 } } }
+        """.utf8))
+        var mine = LeaderboardService.MyRank(try #require(perMetric.rank))
+        #expect(mine.rank(.usd, .month) == 12)
+        #expect(mine.rank(.output, .week) == 1 && mine.rank(.output, .lifetime) == 4)
+        #expect(mine.rank(.streak, .week) == nil && mine.rank(.streak, .month) == 5)
+        mine[.streak][.week] = 9
+        #expect(mine.rank(.streak, .week) == 9 && mine[.streak].month == 5)
     }
 
     // MARK: HTTP status mapping

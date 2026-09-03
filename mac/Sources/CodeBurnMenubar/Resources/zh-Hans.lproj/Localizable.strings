@@ -311,6 +311,7 @@
 "Enter an amount above, or the alert stays off." = "请在上方输入数值，否则提醒将保持关闭。";
 "Enter the required API or cloud credentials below, then press Save & Connect." = "在下方输入所需的 API 或云凭据，然后点击“保存并连接”。";
 "Enter this code on GitHub to finish signing in:" = "在 GitHub 上输入此代码以完成登录：";
+"Enter this code on GitHub:" = "在 GitHub 页面输入这个代码：";
 "Enterprise" = "Enterprise";
 "Euro" = "欧元";
 "Expires %@" = "%@ 过期";
@@ -513,6 +514,7 @@
 "Optional, and only needed when nothing else on this Mac is signed in. A fine-grained personal access token with the \"Plan: Read-only\" permission is enough. The token is saved in CodeBurn's own Keychain item and is used only to read your Copilot quota." = "可选，仅当这台 Mac 上没有其他已登录的来源时才需要。拥有 \"Plan: Read-only\" 权限的细粒度个人访问令牌即可。令牌保存在 CodeBurn 自己的钥匙串条目中，仅用于读取你的 Copilot 额度。";
 "Orange" = "橙色";
 "Other" = "其他";
+"Output" = "产出";
 "Override with the `CodeBurnLeaderboardServer` default if you run your own instance." = "如果你自建了服务，可通过 `CodeBurnLeaderboardServer` 默认值覆盖。";
 "Overrides are optional and are saved only when you press Save & Connect. Secret values use one CodeBurn-owned Keychain item for this provider; background reads suppress authentication UI." = "覆盖设置是可选的，只有在点击“保存并连接”时才会保存。机密值保存在 CodeBurn 为该服务商创建的钥匙串条目中；后台读取不会弹出认证界面。";
 "Paid" = "付费版";
@@ -631,6 +633,7 @@
 "Sign in with Codex first: run `codex login` in your terminal. Then click Try Again." = "请先登录 Codex：在终端运行 `codex login`，然后点击“重试”。";
 "Sign in with GitHub" = "使用 GitHub 登录";
 "Sign in with GitHub above to start uploading." = "请先在上方使用 GitHub 登录，然后开始上传。";
+"Sign in with GitHub to appear here. Only your totals (spend, tokens, calls) are shared, never projects or prompts." = "使用 GitHub 登录即可上榜。只会上传你的汇总数据（花费、token、调用次数），不会上传项目名或提示词。";
 "Sign in with GitHub to be ranked. Only totals are shared." = "使用 GitHub 登录即可获得排名。仅分享总计数据。";
 "Sign in with GitHub to join the leaderboard." = "使用 GitHub 登录以参与排行榜。";
 "Sign in with `codex` (ChatGPT mode) to track quota." = "使用 `codex`（ChatGPT 模式）登录以跟踪额度。";
@@ -644,6 +647,8 @@
 "Sign out" = "退出登录";
 "Sign out of the leaderboard?" = "退出登录排行榜？";
 "Sign-in failed" = "登录失败";
+"Sign-in failed: %@" = "登录失败：%@";
+"Signed in as %@. Sharing is off." = "已登录为 %@，尚未参与排行。";
 "Signed in with GitHub" = "已通过 GitHub 登录";
 "Signing in…" = "正在登录…";
 "Singapore Dollar" = "新加坡元";
@@ -655,6 +660,7 @@
 "Source: Z.ai Coding Plan" = "来源：Z.ai Coding Plan";
 "South African Rand" = "南非兰特";
 "South Korean Won" = "韩元";
+"Spend" = "花费";
 "Spend down %lld%% vs last 7 days" = "花费较前 7 天下降 %lld%%";
 "Spend split per provider (Claude, Codex, Cursor, …)" = "按提供商拆分的花费（Claude、Codex、Cursor 等）";
 "Spend up %lld%% vs prior 7 days" = "花费较前 7 天上升 %lld%%";
@@ -665,7 +671,7 @@
 "Start the Antigravity app, then click Try Again." = "请启动 Antigravity 应用，然后点击“重试”。";
 "Start the local %@ service, then click Retry." = "启动本地 %@ 服务，然后点击“重试”。";
 "Stats" = "统计";
-"Streak" = "连续";
+"Streak" = "活跃";
 "Su" = "日";
 "Subscription" = "订阅";
 "Sun" = "周日";
@@ -701,6 +707,7 @@
 "This month" = "本月";
 "This removes you from the public leaderboard immediately. Your local CodeBurn data is untouched." = "这会立即将你从公开排行榜中移除。本地的 CodeBurn 数据不受影响。";
 "This total may be incomplete." = "此总计可能不完整。";
+"This week" = "本周";
 "Tips for you" = "给你的建议";
 "Today" = "今天";
 "Today · %@ · %@" = "今天 · %@ · %@";

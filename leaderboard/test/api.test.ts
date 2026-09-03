@@ -3,10 +3,11 @@
 // stubbing the global fetch (the Worker under test shares this isolate).
 import { SELF, env } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { utcMonth } from "../src/rules";
+import { utcIsoWeek, utcMonth } from "../src/rules";
 
 const BASE = "https://leaderboard.test";
 const MONTH = utcMonth(Date.now());
+const WEEK = utcIsoWeek(Date.now());
 
 interface GhUser {
   id: number;
@@ -127,15 +128,16 @@ describe("basics", () => {
     expect(await res.text()).toBe("ok");
   });
 
-  it("GET /v1/config exposes vars and the current UTC month", async () => {
+  it("GET /v1/config exposes vars and the current UTC week and month", async () => {
     const res = await SELF.fetch(`${BASE}/v1/config`);
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
       githubClientId: env.GITHUB_CLIENT_ID,
       uploadIntervalMinutes: 60,
       minAppVersion: "0.9.23",
-      board: { month: MONTH },
+      board: { week: WEEK, month: MONTH },
     });
+    expect(WEEK).toMatch(/^\d{4}-W\d{2}$/);
   });
 
   it("GET / serves the Chinese HTML page with no external scripts", async () => {
@@ -144,8 +146,16 @@ describe("basics", () => {
     expect(res.headers.get("content-type")).toContain("text/html");
     const html = await res.text();
     expect(html).toContain('lang="zh-CN"');
+    expect(html).toContain("本周");
     expect(html).toContain("本月");
     expect(html).toContain("累计");
+    expect(html.indexOf('data-board="week"')).toBeLessThan(html.indexOf('data-board="month"'));
+    // metric toggle: 产出 (default) / 花费 / 活跃
+    expect(html).toContain('data-metric="output"');
+    expect(html).toContain('data-metric="usd"');
+    expect(html).toContain('data-metric="streak"');
+    expect(html).toMatch(/id="metric-output" aria-selected="true"/);
+    expect(html).toContain("&metric=");
     expect(html).toContain("https://github.com/TheCrazyAnt/codeburn");
     expect(html).toContain("/v1/leaderboard?board=");
     expect(html).not.toMatch(/<script[^>]*src=/);
@@ -311,7 +321,13 @@ describe("POST /v1/report", () => {
     const token = await signIn(OCTOCAT);
     const res = await postReport(token, reportBody());
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, flagged: false, rank: { month: 1, lifetime: 1 } });
+    // no week fields sent → no weekly row, rank.week is null
+    const periods = { week: null, month: 1, lifetime: 1 };
+    expect(await res.json()).toEqual({ ok: true, flagged: false, rank: { ...periods, usd: periods, output: periods, streak: periods } });
+    const stored = await env.DB.prepare(`SELECT output_tokens, streak_days, active_days FROM users WHERE id = ?1`).bind(OCTOCAT.id).first<any>();
+    expect(stored).toEqual({ output_tokens: 0, streak_days: 0, active_days: 0 });
+    const weekly = await env.DB.prepare(`SELECT COUNT(*) AS n FROM weekly WHERE user_id = ?1`).bind(OCTOCAT.id).first<{ n: number }>();
+    expect(weekly?.n).toBe(0);
 
     const user = await env.DB.prepare(`SELECT * FROM users WHERE id = ?1`).bind(OCTOCAT.id).first<any>();
     expect(user.lifetime_usd).toBeCloseTo(3100.25);
@@ -328,6 +344,52 @@ describe("POST /v1/report", () => {
     const reports = await env.DB.prepare(`SELECT * FROM reports WHERE user_id = ?1`).bind(OCTOCAT.id).all<any>();
     expect(reports.results).toHaveLength(1);
     expect(reports.results[0]).toMatchObject({ month: MONTH, month_usd: 620.5, lifetime_usd: 3100.25, flagged: 0 });
+  });
+
+  it("week slice: upserts the weekly row and returns rank.week", async () => {
+    const token = await signIn(OCTOCAT);
+    const weekBody = { week: WEEK, weekUSD: 200.25, weekTokens: 5_000_000, weekCalls: 120 };
+    const res = await postReport(token, reportBody(weekBody));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, flagged: false, rank: { week: 1, month: 1, lifetime: 1 } });
+
+    const rows = await env.DB.prepare(`SELECT * FROM weekly WHERE user_id = ?1`).bind(OCTOCAT.id).all<any>();
+    expect(rows.results).toHaveLength(1);
+    expect(rows.results[0]).toMatchObject({ week: WEEK, usd: 200.25, tokens: 5_000_000, calls: 120, top_provider: "claude" });
+
+    // upsert: a later report for the same week replaces the row
+    await backdateLastReport(OCTOCAT.id, 11 * 60_000);
+    expect((await postReport(token, reportBody({ ...weekBody, weekUSD: 260, weekCalls: 150 }))).status).toBe(200);
+    const again = await env.DB.prepare(`SELECT usd, calls FROM weekly WHERE user_id = ?1`).bind(OCTOCAT.id).all<any>();
+    expect(again.results).toEqual([{ usd: 260, calls: 150 }]);
+
+    // rank.week counts only visible users with a higher weekly spend
+    const tHubot = await signIn(HUBOT);
+    const hubot = await postReport(tHubot, reportBody({ ...weekBody, weekUSD: 300 }));
+    expect(((await hubot.json()) as any).rank).toMatchObject({ week: 1, month: 1, lifetime: 1 });
+    await backdateLastReport(OCTOCAT.id, 11 * 60_000);
+    const octo = await postReport(token, reportBody({ ...weekBody, weekUSD: 260, monthUSD: 700 }));
+    expect(((await octo.json()) as any).rank).toMatchObject({ week: 2, month: 1, lifetime: 1, usd: { week: 2, month: 1, lifetime: 1 } });
+  });
+
+  it("week slice validation: 400 when partial, stale or malformed; 422 when weekUSD exceeds lifetimeUSD", async () => {
+    const token = await signIn(OCTOCAT);
+    const partial = await postReport(token, reportBody({ week: WEEK, weekUSD: 1 }));
+    expect(partial.status).toBe(400);
+    expect(((await partial.json()) as any).message).toMatch(/week/);
+    expect((await postReport(token, reportBody({ week: "2000-W01", weekUSD: 1, weekTokens: 1, weekCalls: 1 }))).status).toBe(400);
+    expect((await postReport(token, reportBody({ week: "2026-36", weekUSD: 1, weekTokens: 1, weekCalls: 1 }))).status).toBe(400);
+
+    // week may exceed the month (calendar week straddling a month boundary) ...
+    const straddle = await postReport(token, reportBody({ monthUSD: 50, week: WEEK, weekUSD: 400, weekTokens: 1, weekCalls: 1 }));
+    expect(straddle.status).toBe(200);
+    // ... but never lifetime
+    await backdateLastReport(OCTOCAT.id, 11 * 60_000);
+    const tooMuch = await postReport(token, reportBody({ week: WEEK, weekUSD: 4000, weekTokens: 1, weekCalls: 1 }));
+    expect(tooMuch.status).toBe(422);
+    expect(await tooMuch.json()).toMatchObject({ error: "implausible" });
+    const tooManyTokens = await postReport(token, reportBody({ week: WEEK, weekUSD: 1, weekTokens: 200_000_000, weekCalls: 1 }));
+    expect(tooManyTokens.status).toBe(422);
   });
 
   it("400 invalid_field with a clear message for bad input", async () => {
@@ -449,7 +511,7 @@ describe("POST /v1/report", () => {
 
     const board = await getBoard("?board=month", token);
     expect(board.data.entries).toEqual([]);
-    expect(board.data.me).toEqual({ rank: 1, usd: 620.5, tokens: 20_000_000, calls: 900, flagged: true });
+    expect(board.data.me).toMatchObject({ rank: 1, usd: 620.5, tokens: 20_000_000, calls: 900, flagged: true });
   });
 
   it("upserts the monthly row and keeps at most 500 report rows per user", async () => {
@@ -488,7 +550,7 @@ describe("GET /v1/leaderboard", () => {
     // mona: flagged by cost-per-token
     expect((await postReport(tMona, reportBody({ monthUSD: 5000, lifetimeUSD: 9000, lifetimeTokens: 1_000_000, monthTokens: 1 }))).status).toBe(200);
 
-    const anon = await getBoard("?board=month&limit=10");
+    const anon = await getBoard("?board=month&limit=10&metric=usd");
     expect(anon.status).toBe(200);
     expect(anon.data.board).toBe("month");
     expect(anon.data.month).toBe(MONTH);
@@ -504,26 +566,96 @@ describe("GET /v1/leaderboard", () => {
       avatarUrl: HUBOT.avatar_url,
       usd: 900,
       tokens: 20_000_000,
+      outputTokens: 0,
+      streakDays: 0,
       calls: 900,
       topProvider: "claude",
+      value: 900,
     });
     expect(typeof anon.data.updatedAt).toBe("string");
 
-    const mine = await getBoard("?board=month", tOcto);
-    expect(mine.data.me).toEqual({ rank: 2, usd: 620.5, tokens: 20_000_000, calls: 900, flagged: false });
+    const mine = await getBoard("?board=month&metric=usd", tOcto);
+    expect(mine.data.me).toEqual({ rank: 2, usd: 620.5, tokens: 20_000_000, outputTokens: 0, streakDays: 0, calls: 900, value: 620.5, flagged: false });
 
-    const life = await getBoard("?board=lifetime", tHubot);
+    const life = await getBoard("?board=lifetime&metric=usd", tHubot);
     expect(life.data.entries.map((e: any) => [e.rank, e.login, e.usd])).toEqual([
       [1, "octocat", 3100.25],
       [2, "hubot", 1000],
     ]);
-    expect(life.data.me).toEqual({ rank: 2, usd: 1000, tokens: 120_000_000, calls: 5000, flagged: false });
+    expect(life.data.me).toEqual({ rank: 2, usd: 1000, tokens: 120_000_000, outputTokens: 0, streakDays: 0, calls: 5000, value: 1000, flagged: false });
 
     // opt-out hides too
     await env.DB.prepare(`UPDATE users SET opt_out = 1 WHERE id = ?1`).bind(HUBOT.id).run();
     const afterOptOut = await getBoard("?board=month");
     expect(afterOptOut.data.entries.map((e: any) => e.login)).toEqual(["octocat"]);
     expect(afterOptOut.data.totalUsers).toBe(1);
+  });
+
+  it("board=week orders by weekly spend, names the week (no month), reports me, hides flagged/opt-out", async () => {
+    const tOcto = await signIn(OCTOCAT);
+    const tHubot = await signIn(HUBOT);
+    const tMona = await signIn(MONA);
+    const week = (usd: number, tokens = 5_000_000, calls = 120) => ({ week: WEEK, weekUSD: usd, weekTokens: tokens, weekCalls: calls });
+    await postReport(tOcto, reportBody(week(150)));
+    await postReport(tHubot, reportBody({ monthUSD: 900, lifetimeUSD: 1000, lifetimeTokens: 120_000_000, ...week(400, 8_000_000, 300) }));
+    // mona reports no week at all: she is on the month board but not the week board
+    await postReport(tMona, reportBody({ monthUSD: 5000, lifetimeUSD: 9000, lifetimeTokens: 300_000_000 }));
+
+    const anon = await getBoard("?board=week&metric=usd");
+    expect(anon.status).toBe(200);
+    expect(anon.data.board).toBe("week");
+    expect(anon.data.metric).toBe("usd");
+    expect(anon.data.week).toBe(WEEK);
+    expect(anon.data).not.toHaveProperty("month");
+    expect(anon.data.totalUsers).toBe(2);
+    expect(anon.data.me).toBeNull();
+    expect(anon.data.entries.map((e: any) => [e.rank, e.login, e.usd])).toEqual([
+      [1, "hubot", 400],
+      [2, "octocat", 150],
+    ]);
+    expect(anon.data.entries[0]).toEqual({
+      rank: 1,
+      login: "hubot",
+      avatarUrl: HUBOT.avatar_url,
+      usd: 400,
+      tokens: 8_000_000,
+      outputTokens: 0,
+      streakDays: 0,
+      calls: 300,
+      topProvider: "claude",
+      value: 400,
+    });
+
+    const mine = await getBoard("?board=week&metric=usd", tOcto);
+    expect(mine.data.me).toEqual({ rank: 2, usd: 150, tokens: 5_000_000, outputTokens: 0, streakDays: 0, calls: 120, value: 150, flagged: false });
+    const monaWeek = await getBoard("?board=week", tMona);
+    expect(monaWeek.data.me).toBeNull();
+    const monaMonth = await getBoard("?board=month", tMona);
+    expect(monaMonth.data.me?.rank).toBe(1);
+
+    // explicit week selection and validation
+    const other = await getBoard(`?board=week&week=2000-W01`);
+    expect(other.data.week).toBe("2000-W01");
+    expect(other.data.entries).toEqual([]);
+    expect(other.data.totalUsers).toBe(0);
+    expect((await getBoard("?board=week&week=2026-36")).status).toBe(400);
+    expect((await getBoard("?board=week&week=2026-W54")).status).toBe(400);
+    expect((await getBoard("?board=week&limit=1")).data.entries.map((e: any) => e.login)).toEqual(["hubot"]);
+
+    // the month board is unaffected by the week slice
+    const month = await getBoard("?board=month");
+    expect(month.data.entries.map((e: any) => e.login)).toEqual(["mona", "hubot", "octocat"]);
+    expect(month.data).not.toHaveProperty("week");
+
+    // opt-out and flagged users vanish from the week board too
+    await env.DB.prepare(`UPDATE users SET opt_out = 1 WHERE id = ?1`).bind(HUBOT.id).run();
+    const afterOptOut = await getBoard("?board=week", tOcto);
+    expect(afterOptOut.data.entries.map((e: any) => e.login)).toEqual(["octocat"]);
+    expect(afterOptOut.data.totalUsers).toBe(1);
+    expect(afterOptOut.data.me?.rank).toBe(1);
+    await env.DB.prepare(`UPDATE users SET flagged = 1 WHERE id = ?1`).bind(OCTOCAT.id).run();
+    const afterFlag = await getBoard("?board=week");
+    expect(afterFlag.data.entries).toEqual([]);
   });
 
   it("defaults, limits, month selection and validation", async () => {
@@ -533,6 +665,9 @@ describe("GET /v1/leaderboard", () => {
     const def = await getBoard("");
     expect(def.data.board).toBe("month");
     expect(def.data.month).toBe(MONTH);
+    expect(def.data.metric).toBe("output");
+    expect((await getBoard("?metric=spend")).status).toBe(400);
+    expect((await getBoard("?metric=streak")).data.metric).toBe("streak");
 
     const other = await getBoard("?board=month&month=2000-01");
     expect(other.data.entries).toEqual([]);
@@ -542,6 +677,7 @@ describe("GET /v1/leaderboard", () => {
     expect(meOther.data.me).toBeNull();
 
     expect((await getBoard("?board=weekly")).status).toBe(400);
+    expect((await getBoard("?board=week")).status).toBe(200);
     expect((await getBoard("?limit=0")).status).toBe(400);
     expect((await getBoard("?limit=101")).status).toBe(400);
     expect((await getBoard("?limit=abc")).status).toBe(400);
@@ -575,13 +711,108 @@ describe("GET /v1/leaderboard", () => {
   });
 });
 
+describe("metrics", () => {
+  const metrics = (over: Record<string, unknown>) => ({
+    week: WEEK, weekUSD: 10, weekTokens: 1_000_000, weekCalls: 10, weekOutputTokens: 100_000,
+    monthOutputTokens: 2_000_000, lifetimeOutputTokens: 30_000_000, streakDays: 3, activeDays: 40,
+    ...over,
+  });
+
+  it("stores output tokens per period and streak / active days per user; ranks per metric", async () => {
+    const t = await signIn(OCTOCAT);
+    const res = await postReport(t, reportBody(metrics({})));
+    expect(res.status).toBe(200);
+    const data: any = await res.json();
+    const one = { week: 1, month: 1, lifetime: 1 };
+    expect(data.rank).toEqual({ ...one, usd: one, output: one, streak: one });
+
+    const user = await env.DB.prepare(`SELECT output_tokens, streak_days, active_days FROM users WHERE id = ?1`).bind(OCTOCAT.id).first<any>();
+    expect(user).toEqual({ output_tokens: 30_000_000, streak_days: 3, active_days: 40 });
+    const month = await env.DB.prepare(`SELECT output_tokens FROM monthly WHERE user_id = ?1`).bind(OCTOCAT.id).first<any>();
+    expect(month.output_tokens).toBe(2_000_000);
+    const week = await env.DB.prepare(`SELECT output_tokens FROM weekly WHERE user_id = ?1`).bind(OCTOCAT.id).first<any>();
+    expect(week.output_tokens).toBe(100_000);
+  });
+
+  it("422 when output tokens exceed total tokens; streak growth beyond elapsed days flags", async () => {
+    const t = await signIn(OCTOCAT);
+    expect((await postReport(t, reportBody(metrics({ monthOutputTokens: 20_000_001 })))).status).toBe(422);
+    expect((await postReport(t, reportBody(metrics({ weekOutputTokens: 1_000_001 })))).status).toBe(422);
+    expect((await postReport(t, reportBody(metrics({ streakDays: 50, activeDays: 40 })))).status).toBe(400);
+    expect((await postReport(t, reportBody(metrics({})))).status).toBe(200);
+    await backdateLastReport(OCTOCAT.id, 2 * 3_600_000); // 2h → +1 day allowed
+    const jump = await postReport(t, reportBody(metrics({ streakDays: 5, activeDays: 42 })));
+    expect(jump.status).toBe(200);
+    const data: any = await jump.json();
+    expect(data.flagged).toBe(true);
+    expect(data.flagReasons.join(" ")).toMatch(/streak_growth/);
+  });
+
+  it("board ordering per metric with value echo; streak is the same scalar on every board, tie-broken by output", async () => {
+    const tOcto = await signIn(OCTOCAT);
+    const tHubot = await signIn(HUBOT);
+    const tMona = await signIn(MONA);
+    // octocat: most spend, least output, streak 3
+    await postReport(tOcto, reportBody(metrics({ monthUSD: 900, lifetimeUSD: 3000, monthOutputTokens: 1_000_000, lifetimeOutputTokens: 5_000_000, streakDays: 3, activeDays: 40 })));
+    // hubot: mid spend, most output, streak 7
+    await postReport(tHubot, reportBody(metrics({ monthUSD: 500, lifetimeUSD: 2000, monthOutputTokens: 9_000_000, lifetimeOutputTokens: 50_000_000, streakDays: 7, activeDays: 70 })));
+    // mona: least spend, mid output, streak 7 (ties hubot → hubot first on output)
+    await postReport(tMona, reportBody(metrics({ monthUSD: 100, lifetimeUSD: 1000, monthOutputTokens: 4_000_000, lifetimeOutputTokens: 20_000_000, streakDays: 7, activeDays: 30 })));
+
+    const byDefault = await getBoard("?board=month");
+    expect(byDefault.data.metric).toBe("output");
+    expect(byDefault.data.entries.map((e: any) => [e.login, e.value])).toEqual([
+      ["hubot", 9_000_000],
+      ["mona", 4_000_000],
+      ["octocat", 1_000_000],
+    ]);
+    expect(byDefault.data.entries[0]).toMatchObject({ usd: 500, outputTokens: 9_000_000, streakDays: 7, calls: 900, tokens: 20_000_000 });
+
+    const usd = await getBoard("?board=month&metric=usd");
+    expect(usd.data.entries.map((e: any) => [e.login, e.value])).toEqual([["octocat", 900], ["hubot", 500], ["mona", 100]]);
+
+    const streak = await getBoard("?board=month&metric=streak", tOcto);
+    expect(streak.data.entries.map((e: any) => [e.rank, e.login, e.value])).toEqual([[1, "hubot", 7], [2, "mona", 7], [3, "octocat", 3]]);
+    expect(streak.data.me).toMatchObject({ rank: 3, value: 3, streakDays: 3, outputTokens: 1_000_000, usd: 900 });
+
+    const lifeOutput = await getBoard("?board=lifetime", tMona);
+    expect(lifeOutput.data.entries.map((e: any) => [e.login, e.value])).toEqual([["hubot", 50_000_000], ["mona", 20_000_000], ["octocat", 5_000_000]]);
+    expect(lifeOutput.data.me).toMatchObject({ rank: 2, value: 20_000_000, streakDays: 7 });
+    const lifeStreak = await getBoard("?board=lifetime&metric=streak", tMona);
+    expect(lifeStreak.data.entries.map((e: any) => e.login)).toEqual(["hubot", "mona", "octocat"]);
+    // ties never push the rank down
+    expect(lifeStreak.data.me?.rank).toBe(1);
+
+    // week board: hubot and mona tie on streak, week output AND week usd → lowest user id first (mona = 1)
+    const weekStreak = await getBoard("?board=week&metric=streak");
+    expect(weekStreak.data.entries.map((e: any) => [e.login, e.value, e.outputTokens])).toEqual([
+      ["mona", 7, 100_000],
+      ["hubot", 7, 100_000],
+      ["octocat", 3, 100_000],
+    ]);
+
+    // per-metric ranks in the report response for the last reporter (mona)
+    await backdateLastReport(MONA.id, 11 * 60_000);
+    const again: any = await (await postReport(tMona, reportBody(metrics({ monthUSD: 100, lifetimeUSD: 1000, monthOutputTokens: 4_000_000, lifetimeOutputTokens: 20_000_000, streakDays: 7, activeDays: 30 })))).json();
+    // every week value is tied three ways, so each week rank is 1 (ties never push down)
+    expect(again.rank).toEqual({
+      week: 1, month: 3, lifetime: 3,
+      usd: { week: 1, month: 3, lifetime: 3 },
+      output: { week: 1, month: 2, lifetime: 2 },
+      streak: { week: 1, month: 1, lifetime: 1 },
+    });
+  });
+});
+
 describe("DELETE /v1/me", () => {
-  it("removes the user, all sessions, monthly rows and reports; token stops working", async () => {
+  it("removes the user, all sessions, weekly and monthly rows and reports; token stops working", async () => {
     const t1 = await signIn(OCTOCAT);
     const t2 = await signIn(OCTOCAT);
     const tHubot = await signIn(HUBOT);
-    await postReport(t1, reportBody());
-    await postReport(tHubot, reportBody({ monthUSD: 1, lifetimeUSD: 10, lifetimeTokens: 1_000_000, monthTokens: 1 }));
+    const week = { week: WEEK, weekUSD: 1, weekTokens: 1, weekCalls: 1 };
+    await postReport(t1, reportBody(week));
+    await postReport(tHubot, reportBody({ monthUSD: 1, lifetimeUSD: 10, lifetimeTokens: 1_000_000, monthTokens: 1, ...week }));
+    expect((await env.DB.prepare(`SELECT COUNT(*) AS n FROM weekly`).first<{ n: number }>())?.n).toBe(2);
 
     const res = await SELF.fetch(`${BASE}/v1/me`, { method: "DELETE", headers: { Authorization: `Bearer ${t1}` } });
     expect(res.status).toBe(204);
@@ -591,11 +822,15 @@ describe("DELETE /v1/me", () => {
     expect(await count(`SELECT COUNT(*) AS n FROM users WHERE id = ?1`)).toBe(0);
     expect(await count(`SELECT COUNT(*) AS n FROM sessions WHERE user_id = ?1`)).toBe(0);
     expect(await count(`SELECT COUNT(*) AS n FROM monthly WHERE user_id = ?1`)).toBe(0);
+    expect(await count(`SELECT COUNT(*) AS n FROM weekly WHERE user_id = ?1`)).toBe(0);
     expect(await count(`SELECT COUNT(*) AS n FROM reports WHERE user_id = ?1`)).toBe(0);
 
     // other users untouched
     const hubot = await env.DB.prepare(`SELECT COUNT(*) AS n FROM users WHERE id = ?1`).bind(HUBOT.id).first<{ n: number }>();
     expect(hubot?.n).toBe(1);
+    const hubotWeek = await env.DB.prepare(`SELECT COUNT(*) AS n FROM weekly WHERE user_id = ?1`).bind(HUBOT.id).first<{ n: number }>();
+    expect(hubotWeek?.n).toBe(1);
+    expect((await getBoard("?board=week")).data.entries.map((e: any) => e.login)).toEqual(["hubot"]);
 
     expect((await postReport(t1, reportBody())).status).toBe(401);
     expect((await postReport(t2, reportBody())).status).toBe(401);

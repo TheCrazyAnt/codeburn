@@ -11,13 +11,19 @@ import {
 } from "./auth";
 import { LEADERBOARD_HTML } from "./page";
 import {
+  DEFAULT_METRIC,
   MAX_APP_VERSION_LEN,
+  METRICS,
+  type Metric,
   evaluateReport,
+  isMetric,
   rateLimitRetryAfter,
   topProvider,
+  utcIsoWeek,
   utcMonth,
   validateReport,
   MONTH_RE,
+  WEEK_RE,
 } from "./rules";
 
 export interface Env {
@@ -96,6 +102,9 @@ interface UserRow {
   lifetime_usd: number;
   lifetime_tokens: number;
   lifetime_calls: number;
+  output_tokens: number;
+  streak_days: number;
+  active_days: number;
   top_provider: string | null;
   flagged: number;
   opt_out: number;
@@ -149,26 +158,68 @@ async function requireAuth(request: Request, env: Env, nowMs: number): Promise<A
 // Rank helpers (visible = not flagged, not opted out)
 // ---------------------------------------------------------------------------
 
-async function monthRank(env: Env, month: string, userId: number, usd: number): Promise<number> {
+/**
+ * The two calendar boards share one shape: a per-period table keyed by
+ * (user_id, <period key>). Table/column names are constants, never user input.
+ */
+type PeriodTable = { table: "monthly"; column: "month" } | { table: "weekly"; column: "week" };
+const MONTHLY: PeriodTable = { table: "monthly", column: "month" };
+const WEEKLY: PeriodTable = { table: "weekly", column: "week" };
+
+/** SQL expression of the ranked value on a period board (`p` = period row, `u` = user). */
+function periodMetricExpr(metric: Metric): string {
+  switch (metric) {
+    case "usd": return "p.usd";
+    case "output": return "p.output_tokens";
+    case "streak": return "u.streak_days";
+  }
+}
+
+/** SQL expression of the ranked value on the lifetime board (users table). */
+function lifetimeMetricExpr(metric: Metric): string {
+  switch (metric) {
+    case "usd": return "lifetime_usd";
+    case "output": return "output_tokens";
+    case "streak": return "streak_days";
+  }
+}
+
+/** 1 + number of visible users on the board whose metric value is strictly higher. */
+async function periodRank(env: Env, period: PeriodTable, key: string, metric: Metric, userId: number, value: number): Promise<number> {
   const row = await env.DB.prepare(
     `SELECT COUNT(*) AS n
-       FROM monthly m JOIN users u ON u.id = m.user_id
-      WHERE m.month = ?1 AND u.flagged = 0 AND u.opt_out = 0 AND u.id != ?2 AND m.usd > ?3`,
+       FROM ${period.table} p JOIN users u ON u.id = p.user_id
+      WHERE p.${period.column} = ?1 AND u.flagged = 0 AND u.opt_out = 0 AND u.id != ?2 AND ${periodMetricExpr(metric)} > ?3`,
   )
-    .bind(month, userId, usd)
+    .bind(key, userId, value)
     .first<{ n: number }>();
   return (row?.n ?? 0) + 1;
 }
 
-async function lifetimeRank(env: Env, userId: number, usd: number): Promise<number> {
+async function lifetimeRank(env: Env, metric: Metric, userId: number, value: number): Promise<number> {
   const row = await env.DB.prepare(
     `SELECT COUNT(*) AS n
        FROM users
-      WHERE flagged = 0 AND opt_out = 0 AND last_report_at IS NOT NULL AND id != ?1 AND lifetime_usd > ?2`,
+      WHERE flagged = 0 AND opt_out = 0 AND last_report_at IS NOT NULL AND id != ?1 AND ${lifetimeMetricExpr(metric)} > ?2`,
   )
-    .bind(userId, usd)
+    .bind(userId, value)
     .first<{ n: number }>();
   return (row?.n ?? 0) + 1;
+}
+
+/** The numbers one period row contributes to each metric. */
+interface MetricValues {
+  usd: number;
+  outputTokens: number;
+  streakDays: number;
+}
+
+function metricValue(metric: Metric, v: MetricValues): number {
+  switch (metric) {
+    case "usd": return v.usd;
+    case "output": return v.outputTokens;
+    case "streak": return v.streakDays;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -182,7 +233,7 @@ function handleConfig(env: Env, nowMs: number): Response {
       githubClientId: env.GITHUB_CLIENT_ID,
       uploadIntervalMinutes: Number.isFinite(interval) && interval > 0 ? interval : 60,
       minAppVersion: env.MIN_APP_VERSION,
-      board: { month: utcMonth(nowMs) },
+      board: { week: utcIsoWeek(nowMs), month: utcMonth(nowMs) },
     },
     200,
     { "Cache-Control": "public, max-age=300" },
@@ -261,7 +312,7 @@ async function handleReport(request: Request, env: Env, nowMs: number): Promise<
 
   const previous =
     lastReportAtMs !== null && !Number.isNaN(lastReportAtMs)
-      ? { lifetimeUsd: user.lifetime_usd, lastReportAtMs }
+      ? { lifetimeUsd: user.lifetime_usd, lastReportAtMs, streakDays: user.streak_days, activeDays: user.active_days }
       : null;
   const evaluation = evaluateReport(report, previous, nowMs);
   if (evaluation.verdict === "reject") {
@@ -273,11 +324,19 @@ async function handleReport(request: Request, env: Env, nowMs: number): Promise<
   const monthTop = topProvider(report.byProvider, "monthUSD");
   const lifetimeTop = topProvider(report.byProvider, "lifetimeUSD");
 
-  await env.DB.batch([
+  // Metric fields absent from the report (older clients) store as 0.
+  const lifetimeOutput = report.lifetimeOutputTokens ?? 0;
+  const monthOutput = report.monthOutputTokens ?? 0;
+  const weekOutput = report.week?.weekOutputTokens ?? 0;
+  const streakDays = report.streakDays ?? 0;
+  const activeDays = report.activeDays ?? 0;
+
+  const statements: D1PreparedStatement[] = [
     env.DB.prepare(
       `UPDATE users
           SET lifetime_usd = ?1, lifetime_tokens = ?2, lifetime_calls = ?3, top_provider = ?4,
-              flagged = MAX(flagged, ?5), app_version = ?6, last_report_at = ?7
+              flagged = MAX(flagged, ?5), app_version = ?6, last_report_at = ?7,
+              output_tokens = ?9, streak_days = ?10, active_days = ?11
         WHERE id = ?8`,
     ).bind(
       report.lifetimeUSD,
@@ -288,14 +347,18 @@ async function handleReport(request: Request, env: Env, nowMs: number): Promise<
       report.appVersion,
       now,
       user.id,
+      lifetimeOutput,
+      streakDays,
+      activeDays,
     ),
     env.DB.prepare(
-      `INSERT INTO monthly (user_id, month, usd, tokens, calls, top_provider, updated_at)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+      `INSERT INTO monthly (user_id, month, usd, tokens, calls, top_provider, updated_at, output_tokens)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
        ON CONFLICT(user_id, month) DO UPDATE SET
          usd = excluded.usd, tokens = excluded.tokens, calls = excluded.calls,
-         top_provider = excluded.top_provider, updated_at = excluded.updated_at`,
-    ).bind(user.id, report.month, report.monthUSD, report.monthTokens, report.monthCalls, monthTop, now),
+         top_provider = excluded.top_provider, updated_at = excluded.updated_at,
+         output_tokens = excluded.output_tokens`,
+    ).bind(user.id, report.month, report.monthUSD, report.monthTokens, report.monthCalls, monthTop, now, monthOutput),
     env.DB.prepare(
       `INSERT INTO reports (user_id, received_at, month, month_usd, lifetime_usd, flagged)
        VALUES (?1, ?2, ?3, ?4, ?5, ?6)`,
@@ -305,19 +368,53 @@ async function handleReport(request: Request, env: Env, nowMs: number): Promise<
         WHERE user_id = ?1
           AND id NOT IN (SELECT id FROM reports WHERE user_id = ?1 ORDER BY id DESC LIMIT ?2)`,
     ).bind(user.id, REPORTS_KEEP_PER_USER),
-  ]);
+  ];
+  if (report.week) {
+    // byProvider carries no per-week split; the month's top provider is the
+    // closest available proxy for the weekly row.
+    statements.push(
+      env.DB.prepare(
+        `INSERT INTO weekly (user_id, week, usd, tokens, calls, top_provider, updated_at, output_tokens)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+         ON CONFLICT(user_id, week) DO UPDATE SET
+           usd = excluded.usd, tokens = excluded.tokens, calls = excluded.calls,
+           top_provider = excluded.top_provider, updated_at = excluded.updated_at,
+           output_tokens = excluded.output_tokens`,
+      ).bind(user.id, report.week.week, report.week.weekUSD, report.week.weekTokens, report.week.weekCalls, monthTop, now, weekOutput),
+    );
+  }
+  await env.DB.batch(statements);
 
   const flagged = user.flagged === 1 || flaggedNow === 1;
-  const [rankMonth, rankLifetime] = await Promise.all([
-    monthRank(env, report.month, user.id, report.monthUSD),
-    lifetimeRank(env, user.id, report.lifetimeUSD),
-  ]);
+
+  // Ranks per metric × period. The streak is a per-user scalar, so it is the
+  // same number on every board; only the population (who has a row for the
+  // period) differs.
+  const weekValues: MetricValues | null = report.week
+    ? { usd: report.week.weekUSD, outputTokens: weekOutput, streakDays }
+    : null;
+  const monthValues: MetricValues = { usd: report.monthUSD, outputTokens: monthOutput, streakDays };
+  const lifetimeValues: MetricValues = { usd: report.lifetimeUSD, outputTokens: lifetimeOutput, streakDays };
+  const perMetric = await Promise.all(
+    METRICS.map(async (metric) => {
+      const [week, month, lifetime] = await Promise.all([
+        report.week && weekValues
+          ? periodRank(env, WEEKLY, report.week.week, metric, user.id, metricValue(metric, weekValues))
+          : Promise.resolve(null),
+        periodRank(env, MONTHLY, report.month, metric, user.id, metricValue(metric, monthValues)),
+        lifetimeRank(env, metric, user.id, metricValue(metric, lifetimeValues)),
+      ]);
+      return [metric, { week, month, lifetime }] as const;
+    }),
+  );
+  const rank = Object.fromEntries(perMetric) as Record<Metric, { week: number | null; month: number; lifetime: number }>;
 
   return json({
     ok: true,
     flagged,
     ...(evaluation.reasons.length ? { flagReasons: evaluation.reasons } : {}),
-    rank: { month: rankMonth, lifetime: rankLifetime },
+    // Flat week/month/lifetime = the usd ranks (pre-metric clients); nested = per metric.
+    rank: { ...rank.usd, ...rank },
   });
 }
 
@@ -327,8 +424,12 @@ interface BoardEntry {
   avatarUrl: string | null;
   usd: number;
   tokens: number;
+  outputTokens: number;
+  streakDays: number;
   calls: number;
   topProvider: string | null;
+  /** The number the board is ranked by (= usd / outputTokens / streakDays per `metric`). */
+  value: number;
 }
 
 const CORS_PUBLIC_GET = {
@@ -338,10 +439,102 @@ const CORS_PUBLIC_GET = {
   Vary: "Origin, Authorization",
 } as const;
 
+interface BoardMe {
+  rank: number;
+  usd: number;
+  tokens: number;
+  outputTokens: number;
+  streakDays: number;
+  calls: number;
+  value: number;
+  flagged: boolean;
+}
+
+interface BoardData {
+  entries: BoardEntry[];
+  totalUsers: number;
+  updatedAt: string | null;
+  me: BoardMe | null;
+}
+
+interface PeriodRow {
+  login: string;
+  avatar_url: string | null;
+  usd: number;
+  tokens: number;
+  output_tokens: number;
+  streak_days: number;
+  calls: number;
+  top_provider: string | null;
+}
+
+/** Top entries, visible-user count and the caller's own row for a calendar board (month / week). */
+async function periodBoard(
+  env: Env,
+  period: PeriodTable,
+  key: string,
+  metric: Metric,
+  limit: number,
+  auth: AuthContext | null,
+): Promise<BoardData> {
+  const rows = await env.DB.prepare(
+    `SELECT u.login, u.avatar_url, p.usd, p.tokens, p.output_tokens, u.streak_days, p.calls, p.top_provider
+       FROM ${period.table} p JOIN users u ON u.id = p.user_id
+      WHERE p.${period.column} = ?1 AND u.flagged = 0 AND u.opt_out = 0
+      ORDER BY ${periodMetricExpr(metric)} DESC, p.output_tokens DESC, p.usd DESC, u.id ASC
+      LIMIT ?2`,
+  )
+    .bind(key, limit)
+    .all<PeriodRow>();
+  const entries = rows.results.map((r, i) => ({
+    rank: i + 1,
+    login: r.login,
+    avatarUrl: r.avatar_url,
+    usd: r.usd,
+    tokens: r.tokens,
+    outputTokens: r.output_tokens,
+    streakDays: r.streak_days,
+    calls: r.calls,
+    topProvider: r.top_provider,
+    value: metricValue(metric, { usd: r.usd, outputTokens: r.output_tokens, streakDays: r.streak_days }),
+  }));
+  const agg = await env.DB.prepare(
+    `SELECT COUNT(*) AS n, MAX(p.updated_at) AS updated_at
+       FROM ${period.table} p JOIN users u ON u.id = p.user_id
+      WHERE p.${period.column} = ?1 AND u.flagged = 0 AND u.opt_out = 0`,
+  )
+    .bind(key)
+    .first<{ n: number; updated_at: string | null }>();
+
+  let me: BoardMe | null = null;
+  if (auth) {
+    const mine = await env.DB.prepare(
+      `SELECT usd, tokens, output_tokens, calls FROM ${period.table} WHERE user_id = ?1 AND ${period.column} = ?2`,
+    )
+      .bind(auth.user.id, key)
+      .first<{ usd: number; tokens: number; output_tokens: number; calls: number }>();
+    if (mine) {
+      const values = { usd: mine.usd, outputTokens: mine.output_tokens, streakDays: auth.user.streak_days };
+      const value = metricValue(metric, values);
+      me = {
+        rank: await periodRank(env, period, key, metric, auth.user.id, value),
+        usd: mine.usd,
+        tokens: mine.tokens,
+        outputTokens: mine.output_tokens,
+        streakDays: auth.user.streak_days,
+        calls: mine.calls,
+        value,
+        flagged: auth.user.flagged === 1,
+      };
+    }
+  }
+  return { entries, totalUsers: agg?.n ?? 0, updatedAt: agg?.updated_at ?? null, me };
+}
+
 async function handleLeaderboard(request: Request, env: Env, url: URL, nowMs: number): Promise<Response> {
   const boardParam = url.searchParams.get("board") ?? "month";
-  if (boardParam !== "month" && boardParam !== "lifetime") {
-    throw new HttpError(400, "invalid_query", "board must be 'month' or 'lifetime'");
+  if (boardParam !== "week" && boardParam !== "month" && boardParam !== "lifetime") {
+    throw new HttpError(400, "invalid_query", "board must be 'week', 'month' or 'lifetime'");
   }
   const limitParam = url.searchParams.get("limit");
   let limit = DEFAULT_LIMIT;
@@ -355,77 +548,50 @@ async function handleLeaderboard(request: Request, env: Env, url: URL, nowMs: nu
   if (monthParam !== null && !MONTH_RE.test(monthParam)) {
     throw new HttpError(400, "invalid_query", "month must be formatted YYYY-MM");
   }
+  const weekParam = url.searchParams.get("week");
+  const week = weekParam ?? utcIsoWeek(nowMs);
+  if (weekParam !== null && !WEEK_RE.test(weekParam)) {
+    throw new HttpError(400, "invalid_query", "week must be formatted YYYY-Www (ISO week)");
+  }
+  const metricParam = url.searchParams.get("metric") ?? DEFAULT_METRIC;
+  if (!isMetric(metricParam)) {
+    throw new HttpError(400, "invalid_query", `metric must be one of ${METRICS.join(", ")}`);
+  }
+  const metric: Metric = metricParam;
 
   const auth = await authenticate(request, env, nowMs);
 
   let entries: BoardEntry[];
   let totalUsers: number;
   let updatedAt: string | null;
-  let me: { rank: number; usd: number; tokens: number; calls: number; flagged: boolean } | null = null;
+  let me: BoardMe | null = null;
 
-  if (boardParam === "month") {
-    const rows = await env.DB.prepare(
-      `SELECT u.login, u.avatar_url, m.usd, m.tokens, m.calls, m.top_provider
-         FROM monthly m JOIN users u ON u.id = m.user_id
-        WHERE m.month = ?1 AND u.flagged = 0 AND u.opt_out = 0
-        ORDER BY m.usd DESC, m.tokens DESC, u.id ASC
-        LIMIT ?2`,
-    )
-      .bind(month, limit)
-      .all<{ login: string; avatar_url: string | null; usd: number; tokens: number; calls: number; top_provider: string | null }>();
-    entries = rows.results.map((r, i) => ({
-      rank: i + 1,
-      login: r.login,
-      avatarUrl: r.avatar_url,
-      usd: r.usd,
-      tokens: r.tokens,
-      calls: r.calls,
-      topProvider: r.top_provider,
-    }));
-    const agg = await env.DB.prepare(
-      `SELECT COUNT(*) AS n, MAX(m.updated_at) AS updated_at
-         FROM monthly m JOIN users u ON u.id = m.user_id
-        WHERE m.month = ?1 AND u.flagged = 0 AND u.opt_out = 0`,
-    )
-      .bind(month)
-      .first<{ n: number; updated_at: string | null }>();
-    totalUsers = agg?.n ?? 0;
-    updatedAt = agg?.updated_at ?? null;
-
-    if (auth) {
-      const mine = await env.DB.prepare(
-        `SELECT usd, tokens, calls FROM monthly WHERE user_id = ?1 AND month = ?2`,
-      )
-        .bind(auth.user.id, month)
-        .first<{ usd: number; tokens: number; calls: number }>();
-      if (mine) {
-        me = {
-          rank: await monthRank(env, month, auth.user.id, mine.usd),
-          usd: mine.usd,
-          tokens: mine.tokens,
-          calls: mine.calls,
-          flagged: auth.user.flagged === 1,
-        };
-      }
-    }
+  if (boardParam === "week" || boardParam === "month") {
+    const data = boardParam === "week"
+      ? await periodBoard(env, WEEKLY, week, metric, limit, auth)
+      : await periodBoard(env, MONTHLY, month, metric, limit, auth);
+    ({ entries, totalUsers, updatedAt, me } = data);
   } else {
     const rows = await env.DB.prepare(
-      `SELECT login, avatar_url, lifetime_usd, lifetime_tokens, lifetime_calls, top_provider
+      `SELECT login, avatar_url, lifetime_usd, lifetime_tokens, output_tokens, streak_days, lifetime_calls, top_provider
          FROM users
         WHERE flagged = 0 AND opt_out = 0 AND last_report_at IS NOT NULL
-        ORDER BY lifetime_usd DESC, lifetime_tokens DESC, id ASC
+        ORDER BY ${lifetimeMetricExpr(metric)} DESC, output_tokens DESC, lifetime_usd DESC, id ASC
         LIMIT ?1`,
     )
       .bind(limit)
-      .all<{ login: string; avatar_url: string | null; lifetime_usd: number; lifetime_tokens: number; lifetime_calls: number; top_provider: string | null }>();
+      .all<{ login: string; avatar_url: string | null; lifetime_usd: number; lifetime_tokens: number; output_tokens: number; streak_days: number; lifetime_calls: number; top_provider: string | null }>();
     entries = rows.results.map((r, i) => ({
       rank: i + 1,
       login: r.login,
       avatarUrl: r.avatar_url,
       usd: r.lifetime_usd,
       tokens: r.lifetime_tokens,
+      outputTokens: r.output_tokens,
+      streakDays: r.streak_days,
       calls: r.lifetime_calls,
       topProvider: r.top_provider,
+      value: metricValue(metric, { usd: r.lifetime_usd, outputTokens: r.output_tokens, streakDays: r.streak_days }),
     }));
     const agg = await env.DB.prepare(
       `SELECT COUNT(*) AS n, MAX(last_report_at) AS updated_at
@@ -435,12 +601,17 @@ async function handleLeaderboard(request: Request, env: Env, url: URL, nowMs: nu
     updatedAt = agg?.updated_at ?? null;
 
     if (auth && auth.user.last_report_at) {
+      const u = auth.user;
+      const value = metricValue(metric, { usd: u.lifetime_usd, outputTokens: u.output_tokens, streakDays: u.streak_days });
       me = {
-        rank: await lifetimeRank(env, auth.user.id, auth.user.lifetime_usd),
-        usd: auth.user.lifetime_usd,
-        tokens: auth.user.lifetime_tokens,
-        calls: auth.user.lifetime_calls,
-        flagged: auth.user.flagged === 1,
+        rank: await lifetimeRank(env, metric, u.id, value),
+        usd: u.lifetime_usd,
+        tokens: u.lifetime_tokens,
+        outputTokens: u.output_tokens,
+        streakDays: u.streak_days,
+        calls: u.lifetime_calls,
+        value,
+        flagged: u.flagged === 1,
       };
     }
   }
@@ -449,7 +620,9 @@ async function handleLeaderboard(request: Request, env: Env, url: URL, nowMs: nu
   return json(
     {
       board: boardParam,
-      month,
+      metric,
+      // The week board names its week and never a month; the other boards keep `month`.
+      ...(boardParam === "week" ? { week } : { month }),
       updatedAt: updatedAt ?? new Date(nowMs).toISOString(),
       totalUsers,
       entries,
@@ -465,6 +638,7 @@ async function handleDeleteMe(request: Request, env: Env, nowMs: number): Promis
   await env.DB.batch([
     env.DB.prepare(`DELETE FROM sessions WHERE user_id = ?1`).bind(user.id),
     env.DB.prepare(`DELETE FROM monthly WHERE user_id = ?1`).bind(user.id),
+    env.DB.prepare(`DELETE FROM weekly WHERE user_id = ?1`).bind(user.id),
     env.DB.prepare(`DELETE FROM reports WHERE user_id = ?1`).bind(user.id),
     env.DB.prepare(`DELETE FROM users WHERE id = ?1`).bind(user.id),
   ]);

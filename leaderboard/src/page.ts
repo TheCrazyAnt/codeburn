@@ -69,33 +69,48 @@ export const LEADERBOARD_HTML = `<!doctype html>
   </header>
   <div class="toolbar">
     <div class="tabs" role="tablist" aria-label="榜单">
+      <button role="tab" id="tab-week" aria-selected="false" data-board="week">本周</button>
       <button role="tab" id="tab-month" aria-selected="true" data-board="month">本月</button>
       <button role="tab" id="tab-lifetime" aria-selected="false" data-board="lifetime">累计</button>
     </div>
     <div class="meta" id="meta">加载中…</div>
   </div>
+  <div class="toolbar">
+    <div class="tabs" role="tablist" aria-label="排名依据">
+      <button role="tab" id="metric-output" aria-selected="true" data-metric="output">产出</button>
+      <button role="tab" id="metric-usd" aria-selected="false" data-metric="usd">花费</button>
+      <button role="tab" id="metric-streak" aria-selected="false" data-metric="streak">活跃</button>
+    </div>
+    <div class="meta">排名依据：<span id="metric-name">产出 (tokens)</span></div>
+  </div>
   <div class="card">
     <table aria-live="polite">
       <thead>
-        <tr>
-          <th class="rank">#</th>
-          <th>用户</th>
-          <th class="num">花费 (USD)</th>
-          <th class="num hide-sm">Tokens</th>
-          <th class="num hide-sm">调用次数</th>
-          <th class="hide-sm">主要工具</th>
-        </tr>
+        <tr id="head"></tr>
       </thead>
-      <tbody id="rows"><tr><td colspan="6" class="empty">加载中…</td></tr></tbody>
+      <tbody id="rows"><tr><td colspan="7" class="empty">加载中…</td></tr></tbody>
     </table>
   </div>
   <footer>
-    数据来自用户<strong>自愿开启</strong>的 <a href="https://github.com/TheCrazyAnt/codeburn" rel="noopener">CodeBurn</a> 客户端上报，仅包含汇总的花费金额、Token 数与调用次数，不含任何项目名称、会话内容或文件路径。金额以美元计，按各工具官方定价估算。每 60 秒自动刷新。
+    数据来自用户<strong>自愿开启</strong>的 <a href="https://github.com/TheCrazyAnt/codeburn" rel="noopener">CodeBurn</a> 客户端上报，仅包含汇总的花费金额、Token 数、调用次数与活跃天数，不含任何项目名称、会话内容或文件路径。金额以美元计，按各工具官方定价估算。每 60 秒自动刷新。
   </footer>
 </main>
 <script>
 (function () {
   var board = "month";
+  var metric = "output";
+  var METRICS = {
+    output: { label: "产出", head: "产出 (tokens)", format: function (v) { return compact.format(v || 0); } },
+    usd: { label: "花费", head: "花费 (USD)", format: function (v) { return "$" + usdFmt.format(v || 0); } },
+    streak: { label: "活跃", head: "连续活跃", format: function (v) { return intFmt.format(v || 0) + " 天"; } }
+  };
+  function metricValue(e, m) {
+    if (m === "usd") return e.usd;
+    if (m === "streak") return e.streakDays;
+    return e.outputTokens;
+  }
+  var headEl = document.getElementById("head");
+  var metricNameEl = document.getElementById("metric-name");
   var rowsEl = document.getElementById("rows");
   var metaEl = document.getElementById("meta");
   var subEl = document.getElementById("subtitle");
@@ -118,12 +133,35 @@ export const LEADERBOARD_HTML = `<!doctype html>
     return p[0] + " 年 " + parseInt(p[1], 10) + " 月";
   }
 
+  function weekLabel(w) {
+    if (!w) return "";
+    var p = w.split("-W");
+    return p[0] + " 年第 " + parseInt(p[1], 10) + " 周";
+  }
+
+  function otherMetrics(m) {
+    return ["output", "usd", "streak"].filter(function (k) { return k !== m; });
+  }
+
+  function renderHead(m) {
+    headEl.textContent = "";
+    var rank = el("th", "rank", "#"); headEl.appendChild(rank);
+    headEl.appendChild(el("th", null, "用户"));
+    headEl.appendChild(el("th", "num", METRICS[m].head));
+    otherMetrics(m).forEach(function (k) { headEl.appendChild(el("th", "num hide-sm", METRICS[k].head)); });
+    headEl.appendChild(el("th", "num hide-sm", "调用次数"));
+    headEl.appendChild(el("th", "hide-sm", "主要工具"));
+    metricNameEl.textContent = METRICS[m].head;
+  }
+
   function render(data) {
+    var m = data.metric || metric;
+    renderHead(m);
     rowsEl.textContent = "";
     if (!data.entries || data.entries.length === 0) {
       var tr = el("tr");
       var td = el("td", "empty", "暂无数据 —— 成为第一个上榜的人吧。");
-      td.colSpan = 6;
+      td.colSpan = 7;
       tr.appendChild(td);
       rowsEl.appendChild(tr);
     } else {
@@ -150,10 +188,16 @@ export const LEADERBOARD_HTML = `<!doctype html>
         userTd.appendChild(user);
         tr.appendChild(userTd);
 
-        tr.appendChild(el("td", "num usd", "$" + usdFmt.format(e.usd || 0)));
-        var tok = el("td", "num hide-sm", compact.format(e.tokens || 0));
-        tok.title = intFmt.format(e.tokens || 0);
-        tr.appendChild(tok);
+        var value = e.value !== undefined && e.value !== null ? e.value : metricValue(e, m);
+        var valueTd = el("td", "num usd", METRICS[m].format(value));
+        if (m === "output") valueTd.title = intFmt.format(value || 0) + " tokens";
+        tr.appendChild(valueTd);
+        otherMetrics(m).forEach(function (k) {
+          var v = metricValue(e, k);
+          var td = el("td", "num hide-sm", METRICS[k].format(v));
+          if (k === "output") td.title = intFmt.format(v || 0) + " tokens";
+          tr.appendChild(td);
+        });
         tr.appendChild(el("td", "num hide-sm", intFmt.format(e.calls || 0)));
         var prov = el("td", "hide-sm");
         if (e.topProvider) prov.appendChild(el("span", "tag", e.topProvider));
@@ -164,15 +208,16 @@ export const LEADERBOARD_HTML = `<!doctype html>
     var when = data.updatedAt ? new Date(data.updatedAt) : null;
     var whenText = when && !isNaN(when.getTime()) ? when.toLocaleString("zh-CN", { hour12: false }) : "—";
     metaEl.textContent = "共 " + intFmt.format(data.totalUsers || 0) + " 人 · 更新于 " + whenText;
-    subEl.textContent = data.board === "month"
-      ? monthLabel(data.month) + " · AI 编程花费排行（自愿加入，仅汇总金额）"
-      : "累计 · AI 编程花费排行（自愿加入，仅汇总金额）";
+    var scope = data.board === "week" ? weekLabel(data.week)
+      : data.board === "month" ? monthLabel(data.month)
+      : "累计";
+    subEl.textContent = scope + " · AI 编程花费排行（自愿加入，仅汇总金额）";
   }
 
   function load() {
-    fetch("/v1/leaderboard?board=" + board + "&limit=100", { cache: "no-store" })
+    fetch("/v1/leaderboard?board=" + board + "&metric=" + metric + "&limit=100", { cache: "no-store" })
       .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
-      .then(function (data) { if (data.board === board) render(data); })
+      .then(function (data) { if (data.board === board && (data.metric || metric) === metric) render(data); })
       .catch(function (err) {
         metaEl.textContent = "加载失败：" + err.message;
         metaEl.classList.add("error");
@@ -184,18 +229,24 @@ export const LEADERBOARD_HTML = `<!doctype html>
     timer = setInterval(load, 60000);
   }
 
-  Array.prototype.forEach.call(document.querySelectorAll('.tabs button'), function (btn) {
-    btn.addEventListener("click", function () {
-      board = btn.getAttribute("data-board");
-      Array.prototype.forEach.call(document.querySelectorAll('.tabs button'), function (b) {
-        b.setAttribute("aria-selected", b === btn ? "true" : "false");
+  function wireTabs(attr, onSelect) {
+    var buttons = document.querySelectorAll('.tabs button[' + attr + ']');
+    Array.prototype.forEach.call(buttons, function (btn) {
+      btn.addEventListener("click", function () {
+        onSelect(btn.getAttribute(attr));
+        Array.prototype.forEach.call(buttons, function (b) {
+          b.setAttribute("aria-selected", b === btn ? "true" : "false");
+        });
+        metaEl.classList.remove("error");
+        metaEl.textContent = "加载中…";
+        load();
+        schedule();
       });
-      metaEl.classList.remove("error");
-      metaEl.textContent = "加载中…";
-      load();
-      schedule();
     });
-  });
+  }
+  wireTabs("data-board", function (v) { board = v; });
+  wireTabs("data-metric", function (v) { metric = v; });
+  renderHead(metric);
 
   document.addEventListener("visibilitychange", function () {
     if (document.visibilityState === "visible") load();
