@@ -1,9 +1,11 @@
 name: zh installer lint
 
 # The Chinese fork ships two installer scripts that its users pipe straight into
-# a shell. They are authored on macOS, where PowerShell is usually absent, so the
-# .ps1 is parsed on a real Windows runner here and the .sh is checked with bash -n
-# and shellcheck. Cheap insurance against shipping a script that cannot even parse.
+# a shell. They are authored on macOS, where PowerShell is usually absent, so
+# they are parsed and then actually RUN on real Windows and Linux runners here.
+# Parsing alone would not have caught the PATH bug a user hit on Windows, where
+# npm installs the global shim into a directory the running shell's PATH
+# snapshot does not contain.
 on:
   push:
     branches: [zh-hans]
@@ -54,3 +56,47 @@ jobs:
         run: |
           sudo apt-get update -qq && sudo apt-get install -y shellcheck
           shellcheck -S warning mac/Scripts/install-zh.sh
+
+  windows-install:
+    # Runs the installer the way a user does. --CliOnly keeps it to the npm
+    # package, so no MSI is installed on the runner.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.13.0
+      - name: Run install-zh.ps1 -CliOnly
+        shell: pwsh
+        run: ./windows/Scripts/install-zh.ps1 -CliOnly
+      - name: codeburn must be usable in a fresh shell
+        shell: pwsh
+        run: |
+          $version = (& codeburn --version)
+          Write-Host "version: $version"
+          if (-not $version) { throw 'codeburn produced no version' }
+          $lang = (& codeburn lang) -join "`n"
+          Write-Host $lang
+          if ($lang -notmatch 'zh-CN') { throw 'installer did not set the language to zh-CN' }
+      - name: the terminal dashboard must render
+        shell: pwsh
+        run: |
+          $out = (& codeburn today) -join "`n"
+          if (-not $out) { throw 'codeburn today produced no output' }
+          Write-Host $out
+
+  linux-install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.13.0
+      - name: Run install-zh.sh --cli-only
+        run: bash ./mac/Scripts/install-zh.sh --cli-only
+      - name: codeburn must be usable in a fresh shell
+        run: |
+          set -euo pipefail
+          codeburn --version
+          codeburn lang | grep -q 'zh-CN' || { echo 'installer did not set the language'; exit 1; }
+          codeburn today > /dev/null

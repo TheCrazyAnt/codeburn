@@ -77,14 +77,41 @@ try {
   & npm install -g $tgz 2>&1 | Out-Null
   if ($LASTEXITCODE -ne 0) { Die "npm 安装失败。可以手动执行：npm install -g $($cli.Url)" }
 
-  $codeburn = (Get-Command codeburn -ErrorAction SilentlyContinue)
-  if (-not $codeburn) { Die '命令行安装完成但 PATH 里找不到 codeburn，请重开 PowerShell 后重试。' }
-  Say '设置界面语言为简体中文 ...'
-  & codeburn lang zh-CN 2>&1 | Out-Null
+  # npm 把全局命令装到它自己的 prefix 目录下，而 PowerShell 的 $env:PATH 是进程
+  # 启动时的快照 —— 首次全局安装时那个目录往往还不在里面。所以直接问 npm 要路径，
+  # 而不是依赖 Get-Command。
+  $codeburnCmd = (Get-Command codeburn -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+  if (-not $codeburnCmd) {
+    $npmPrefix = (& npm prefix -g 2>$null | Select-Object -First 1)
+    if ($npmPrefix) {
+      $npmPrefix = $npmPrefix.Trim()
+      foreach ($candidate in @(
+        (Join-Path $npmPrefix 'codeburn.cmd'),
+        (Join-Path $npmPrefix 'codeburn.ps1'),
+        (Join-Path $npmPrefix 'codeburn'),
+        (Join-Path (Join-Path $npmPrefix 'bin') 'codeburn.cmd'),
+        (Join-Path (Join-Path $npmPrefix 'bin') 'codeburn')
+      )) {
+        if (Test-Path $candidate) { $codeburnCmd = $candidate; break }
+      }
+      # 让本次会话后续的调用也能直接用 codeburn
+      if ($codeburnCmd -and ($env:PATH -notlike "*$npmPrefix*")) { $env:PATH = "$npmPrefix;$env:PATH" }
+    }
+  }
+
+  if ($codeburnCmd) {
+    Say '设置界面语言为简体中文 ...'
+    & $codeburnCmd lang zh-CN 2>&1 | Out-Null
+  } else {
+    # 不中止：托盘应用会自己找命令行，用户重开终端后也能正常用。
+    Write-Host '! 暂时没能在 PATH 里找到 codeburn，跳过语言设置。' -ForegroundColor Yellow
+    Write-Host '  重开一个 PowerShell 窗口后执行：codeburn lang zh-CN' -ForegroundColor Yellow
+  }
 
   if ($CliOnly) {
     Write-Host ''
     Write-Host "√ 命令行安装完成（$($cli.Tag)）" -ForegroundColor Green
+    if (-not $codeburnCmd) { Write-Host '  请先重开一个 PowerShell 窗口，然后：' -ForegroundColor Yellow }
     Write-Host '  试试：codeburn      终端仪表盘'
     Write-Host '        codeburn web  浏览器仪表盘'
     return
@@ -115,6 +142,7 @@ try {
   Write-Host ''
   Write-Host "√ 安装完成" -ForegroundColor Green
   Write-Host "  命令行 $($cli.Tag)：codeburn（终端） / codeburn web（浏览器）"
+  if (-not $codeburnCmd) { Write-Host '  注意：需要重开一个 PowerShell 窗口，codeburn 命令才会生效。' -ForegroundColor Yellow }
   Write-Host "  托盘应用 $($msi.Tag)：任务栏右下角会出现 CodeBurn 图标。"
   if ($proc.ExitCode -eq 3010) { Write-Host '  提示：安装程序建议重启一次电脑。' -ForegroundColor Yellow }
 } finally {
