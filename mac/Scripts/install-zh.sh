@@ -53,8 +53,15 @@ pick_asset() {
   python3 - "$1" "$2" "${RELEASES}" <<'PY'
 import json, re, sys
 prefix, pattern, path = sys.argv[1], sys.argv[2], sys.argv[3]
+
+def natural_key(tag):
+    # GitHub lists releases in string order, where "zh10" sorts between "zh1"
+    # and "zh2". Compare digit runs as numbers so zh10 beats zh9.
+    return [int(part) if part.isdigit() else part for part in re.split(r"(\d+)", tag)]
+
+candidates = []
 for release in json.load(open(path)):
-    if not release["tag_name"].startswith(prefix):
+    if release.get("draft") or not release["tag_name"].startswith(prefix):
         continue
     asset = next((a for a in release["assets"] if re.fullmatch(pattern, a["name"])), None)
     if not asset:
@@ -62,8 +69,11 @@ for release in json.load(open(path)):
     checksum = next((a for a in release["assets"] if a["name"] == asset["name"] + ".sha256"), None)
     if not checksum:
         continue
-    print(asset["browser_download_url"], checksum["browser_download_url"], release["tag_name"])
-    break
+    candidates.append((natural_key(release["tag_name"]), asset, checksum, release["tag_name"]))
+
+if candidates:
+    _, asset, checksum, tag = max(candidates, key=lambda c: c[0])
+    print(asset["browser_download_url"], checksum["browser_download_url"], tag)
 PY
 }
 

@@ -43,16 +43,31 @@ try {
 }
 
 # 只认 windows-v* 的发布，里面必须同时有 .msi 和 .msi.sha256
+# GitHub 按标签名的字符串顺序返回发布，"zh10" 会排在 "zh1" 和 "zh2" 之间。
+# 把数字段左侧补零后再排序，才能让 zh10 胜过 zh9。
+function Get-NaturalKey ([string]$text) {
+  return [regex]::Replace($text, '\d+', { param($m) $m.Value.PadLeft(10, '0') })
+}
+
 function Select-Asset ($releases, $tagPrefix, $pattern) {
+  $candidates = @()
   foreach ($r in $releases) {
+    if ($r.draft) { continue }
     if ($r.tag_name -notlike "$tagPrefix*") { continue }
     $asset = $r.assets | Where-Object { $_.name -match $pattern } | Select-Object -First 1
     if (-not $asset) { continue }
     $sum = $r.assets | Where-Object { $_.name -eq ($asset.name + '.sha256') } | Select-Object -First 1
     if (-not $sum) { continue }
-    return [pscustomobject]@{ Tag = $r.tag_name; Url = $asset.browser_download_url; SumUrl = $sum.browser_download_url; Name = $asset.name }
+    $candidates += [pscustomobject]@{
+      Tag    = $r.tag_name
+      Url    = $asset.browser_download_url
+      SumUrl = $sum.browser_download_url
+      Name   = $asset.name
+      Key    = (Get-NaturalKey $r.tag_name)
+    }
   }
-  return $null
+  if ($candidates.Count -eq 0) { return $null }
+  return ($candidates | Sort-Object -Property Key -Descending | Select-Object -First 1)
 }
 
 function Get-Verified ($asset, $destination, $headers) {
