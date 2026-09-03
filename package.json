@@ -1,6 +1,6 @@
 {
   "name": "codeburn",
-  "version": "0.9.23",
+  "version": "0.9.23-zh1",
   "description": "See where your AI spend goes - by task, tool, model, and project",
   "type": "module",
   "main": "./dist/cli.js",
@@ -9,12 +9,13 @@
   },
   "files": [
     "dist",
+    "dist/locales",
     "THIRD_PARTY_NOTICES.md",
     "!dist/parse-worker.js.map"
   ],
   "scripts": {
     "bundle-litellm": "node scripts/bundle-litellm.mjs",
-    "build": "tsup && node -e \"const fs=require('fs'); fs.copyFileSync('src/cli.ts','dist/cli.js'); fs.chmodSync('dist/cli.js',0o755)\" && npm run build:dash",
+    "build": "tsup && node -e \"const fs=require('fs'); fs.copyFileSync('src/cli.ts','dist/cli.js'); fs.chmodSync('dist/cli.js',0o755); fs.mkdirSync('dist/locales',{recursive:true}); for (const f of fs.readdirSync('src/locales')) fs.copyFileSync('src/locales/'+f,'dist/locales/'+f)\" && npm run build:dash",
     "build:cli": "tsup && node -e \"const fs=require('fs'); fs.copyFileSync('src/cli.ts','dist/cli.js'); fs.chmodSync('dist/cli.js',0o755)\"",
     "build:dash": "cd dash && npm ci --no-audit --no-fund --silent && npm run build",
     "dev": "NODE_OPTIONS=--no-deprecation tsx src/cli.ts",
