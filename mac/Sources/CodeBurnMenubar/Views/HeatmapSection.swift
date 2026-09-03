@@ -15,18 +15,20 @@ private let yyyymmdd: DateFormatter = {
     return f
 }()
 
+// Display formatters follow the UI locale ("Mon May 4" / "5月4日 周一");
+// only the yyyy-MM-dd parser above must stay POSIX.
 private let prettyDayFormat: DateFormatter = {
     let f = DateFormatter()
-    f.dateFormat = "EEE MMM d"
-    f.locale = Locale(identifier: "en_US_POSIX")
+    f.locale = .current
+    f.setLocalizedDateFormatFromTemplate("EEEMMMd")
     return f
 }()
 
 private let mmmDayFormat: DateFormatter = {
     let f = DateFormatter()
-    f.dateFormat = "MMM d"
-    f.locale = Locale(identifier: "en_US_POSIX")
+    f.locale = .current
     f.timeZone = .current
+    f.setLocalizedDateFormatFromTemplate("MMMd")
     return f
 }()
 

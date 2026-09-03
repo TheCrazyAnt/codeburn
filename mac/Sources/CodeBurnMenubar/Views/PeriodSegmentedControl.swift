@@ -185,7 +185,8 @@ private struct CalendarPopover: View {
 
     private var monthYearLabel: String {
         let f = DateFormatter()
-        f.dateFormat = "MMMM yyyy"
+        f.locale = .current
+        f.setLocalizedDateFormatFromTemplate("yyyyMMMM")
         return f.string(from: displayMonth)
     }
 

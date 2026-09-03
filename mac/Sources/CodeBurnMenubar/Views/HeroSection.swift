@@ -154,7 +154,8 @@ struct HeroSection: View {
 
     private var todayDate: String {
         let formatter = DateFormatter()
-        formatter.dateFormat = "EEE MMM d"
+        formatter.locale = .current
+        formatter.setLocalizedDateFormatFromTemplate("EEEMMMd")
         return formatter.string(from: Date())
     }
 }
