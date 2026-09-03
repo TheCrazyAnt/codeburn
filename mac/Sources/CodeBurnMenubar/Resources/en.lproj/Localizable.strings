@@ -252,6 +252,7 @@
 "Codex token refresh network error: %@" = "Codex token refresh network error: %@";
 "Codex token refresh response was malformed." = "Codex token refresh response was malformed.";
 "Coding" = "Coding";
+"Colored by quota level" = "Colored by quota level";
 "Combined" = "Combined";
 "Combined unavailable · showing local" = "Combined unavailable · showing local";
 "Combined · %@" = "Combined · %@";
@@ -393,6 +394,7 @@
 "How it works" = "How it works";
 "How often the menubar figure re-reads your local session data. Auto refreshes every 30 seconds while you're plugged in and backs off on battery; Manual only refreshes when you open the popover or click Refresh Now." = "How often the menubar figure re-reads your local session data. Auto refreshes every 30 seconds while you're plugged in and backs off on battery; Manual only refreshes when you open the popover or click Refresh Now.";
 "Icon Only" = "Icon Only";
+"Icon color" = "Icon color";
 "Indian Rupee" = "Indian Rupee";
 "Individual" = "Individual";
 "Installed app or CLI" = "Installed app or CLI";
@@ -469,6 +471,7 @@
 "Mo" = "Mo";
 "Models" = "Models";
 "Mon" = "Mon";
+"Monochrome (system style)" = "Monochrome (system style)";
 "Month" = "Month";
 "Month-to-date" = "Month-to-date";
 "Monthly" = "Monthly";

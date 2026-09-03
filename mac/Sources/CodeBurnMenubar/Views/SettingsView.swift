@@ -437,6 +437,15 @@ private struct GeneralSettingsTab: View {
                     Text("Credits (Codex)").tag(DisplayMetric.credits)
                     Text("Icon Only").tag(DisplayMetric.iconOnly)
                 }
+                Picker("Icon color", selection: Binding(
+                    get: { MenubarIconStyle.current },
+                    set: { MenubarIconStyle.select($0) }
+                )) {
+                    ForEach(MenubarIconStyle.allCases) { style in
+                        Text(style.displayName).tag(style)
+                    }
+                }
+                .pickerStyle(.menu)
                 Picker("Period", selection: Binding(
                     get: { store.menubarPeriod },
                     set: { store.setMenubarPeriod($0) }

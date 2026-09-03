@@ -219,6 +219,7 @@
 "Codex token refresh network error: %@" = "Codex token 刷新时发生网络错误：%@";
 "Codex token refresh response was malformed." = "Codex token 刷新响应格式异常。";
 "Coding" = "编码";
+"Colored by quota level" = "按额度使用率变色";
 "Combined" = "合并";
 "Combined unavailable · showing local" = "合并数据不可用 · 显示本机";
 "Combined · %@" = "合并 · %@";
@@ -354,6 +355,7 @@
 "How it works" = "工作原理";
 "How often the menubar figure re-reads your local session data. Auto refreshes every 30 seconds while you're plugged in and backs off on battery; Manual only refreshes when you open the popover or click Refresh Now." = "菜单栏数字重新读取本地会话数据的频率。“自动”在接通电源时每 30 秒刷新一次，使用电池时会降低频率；“手动”仅在打开弹窗或点击“立即刷新”时刷新。";
 "Icon Only" = "仅图标";
+"Icon color" = "图标颜色";
 "Indian Rupee" = "印度卢比";
 "Individual" = "个人版";
 "Installed app or CLI" = "已安装的应用或 CLI";
@@ -424,6 +426,7 @@
 "Mo" = "一";
 "Models" = "模型";
 "Mon" = "周一";
+"Monochrome (system style)" = "单色（系统风格）";
 "Month" = "本月";
 "Month-to-date" = "本月至今";
 "Monthly" = "每月";

@@ -100,6 +100,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
             NotificationCenter.default.removeObserver(providerSettingsObserver)
             self.providerSettingsObserver = nil
         }
+        if let iconStyleObserver {
+            NotificationCenter.default.removeObserver(iconStyleObserver)
+            self.iconStyleObserver = nil
+        }
         if let monitor = rightClickMonitor {
             NSEvent.removeMonitor(monitor)
             rightClickMonitor = nil
@@ -168,7 +172,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
         Task { await updateChecker.checkIfNeeded() }
     }
 
+    private var iconStyleObserver: NSObjectProtocol?
+
+    private func observeMenubarIconStyle() {
+        iconStyleObserver = NotificationCenter.default.addObserver(
+            forName: MenubarIconStyle.changed,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.refreshStatusButton() }
+        }
+    }
+
     private func observeCapacityDockProviderSettingsRequests() {
+        observeMenubarIconStyle()
         providerSettingsObserver = NotificationCenter.default.addObserver(
             forName: .capacityDockOpenProviderSettings,
             object: nil,
@@ -1270,6 +1287,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
         if tint == nil, store.isOverDailyBudget {
             tint = NSColor.systemYellow
         }
+        // Monochrome mode keeps the flame a template image like the system's own
+        // menu bar icons; quota and budget warnings still show in the popover.
+        if MenubarIconStyle.current == .monochrome { tint = nil }
         let flame = Self.menubarFlameImage(tint: tint)
 
         let attachment = NSTextAttachment()
