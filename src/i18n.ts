@@ -110,8 +110,11 @@ function format(template: string, args: unknown[]): string {
 /// Translates `key` and substitutes positional arguments. Unknown keys return
 /// the key itself, which is the English text.
 export function t(key: string, ...args: unknown[]): string {
-  const template = catalog[key] ?? key
-  return args.length > 0 ? format(template, args) : template
+  // Always run the formatter, even with no arguments, so `%%` is unescaped
+  // consistently. A placeholder with no matching argument is left verbatim,
+  // which keeps keys that merely contain a percent sign ("100% local")
+  // intact.
+  return format(catalog[key] ?? key, args)
 }
 
 /// Plural helper for the handful of places that need it. English keys carry
