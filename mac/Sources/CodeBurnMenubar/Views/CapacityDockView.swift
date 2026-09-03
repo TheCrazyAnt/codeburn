@@ -696,7 +696,7 @@ struct CapacityDockDetailView: View {
                 sessionsSection(sessions).dividerBelow()
             }
             if let today = store.capacityDockToday {
-                todaySection(today).dividerBelow()
+                todaySection(today, provider: provider).dividerBelow()
             }
             if CapacityDockGlance.drawsWindows(quota) { windowsSection(quota) }
             Spacer(minLength: 0)
@@ -877,13 +877,38 @@ struct CapacityDockDetailView: View {
     }
 
     @ViewBuilder
-    private func todaySection(_ today: CurrentBlock) -> some View {
+    /// The CLI's per-provider split of today's totals. Nil when the payload
+    /// predates `providerDetails`, in which case the glance falls back to the
+    /// all-provider totals.
+    private static func providerToday(
+        _ today: CurrentBlock,
+        provider: CapacityDockProvider
+    ) -> (cost: Double, calls: Int)? {
+        guard !today.providerDetails.isEmpty else { return nil }
+        let wanted = [provider.id, provider.legacyFilter?.rawValue ?? "", provider.displayName]
+            .map { $0.lowercased() }
+            .filter { !$0.isEmpty }
+        let match = today.providerDetails.first { detail in
+            let id = detail.id.lowercased()
+            let label = detail.label.lowercased()
+            return wanted.contains(id) || wanted.contains(label)
+                || wanted.contains { id.hasPrefix($0) || $0.hasPrefix(id) }
+        }
+        return (match?.cost ?? 0, match?.calls ?? 0)
+    }
+
+    private func todaySection(_ today: CurrentBlock, provider: CapacityDockProvider) -> some View {
         let s = model.detailScale
-        VStack(alignment: .leading, spacing: 0) {
-            sectionCaption(L("Today"), trailing: nil)
+        // Per-provider spend when the CLI supplies it; tokens are only known in
+        // aggregate, so they are shown just for the all-provider fallback.
+        let scoped = Self.providerToday(today, provider: provider)
+        let cost = scoped?.cost ?? today.cost
+        let calls = scoped?.calls ?? today.calls
+        return VStack(alignment: .leading, spacing: 0) {
+            sectionCaption(L("Today"), trailing: scoped == nil ? nil : provider.displayName)
             HStack(alignment: .center, spacing: 8 * s) {
                 HStack(alignment: .firstTextBaseline, spacing: 5 * s) {
-                    Text(today.cost.asCompactCurrency())
+                    Text(cost.asCompactCurrency())
                         .font(.system(size: 17, weight: .semibold))
                         .monospacedDigit()
                         .foregroundStyle(Color.capacityDockText)
@@ -893,9 +918,11 @@ struct CapacityDockDetailView: View {
                 }
                 Spacer(minLength: 8)
                 VStack(alignment: .trailing, spacing: 3 * s) {
-                    tokenLine("arrow.down", Double(today.inputTokens))
-                    tokenLine("arrow.up", Double(today.outputTokens))
-                    Text("\(today.calls.asThousandsSeparated()) calls")
+                    if scoped == nil {
+                        tokenLine("arrow.down", Double(today.inputTokens))
+                        tokenLine("arrow.up", Double(today.outputTokens))
+                    }
+                    Text("\(calls.asThousandsSeparated()) calls")
                         .font(.system(size: 10))
                         .monospacedDigit()
                         .foregroundStyle(Color.capacityDockText.opacity(0.6))

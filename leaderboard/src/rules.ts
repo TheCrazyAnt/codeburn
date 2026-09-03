@@ -363,11 +363,17 @@ export function evaluateReport(
     }
     // Days can only accrue one per calendar day: the streak / active-day
     // counters may grow by at most (whole days elapsed + 1) between reports.
+    // A previous report that never carried the day counters (older client,
+    // or the field was absent) has nothing to compare against: the first
+    // report with counters may legitimately jump from 0 to any value.
     const maxDayGain = Math.floor(hours / 24) + 1;
-    const dayChecks: Array<[string, number | null, number]> = [
-      ["streak_growth", report.streakDays, previous.streakDays ?? 0],
-      ["active_days_growth", report.activeDays, previous.activeDays ?? 0],
-    ];
+    const previousHadDays = (previous.activeDays ?? 0) > 0 || (previous.streakDays ?? 0) > 0;
+    const dayChecks: Array<[string, number | null, number]> = previousHadDays
+      ? [
+          ["streak_growth", report.streakDays, previous.streakDays ?? 0],
+          ["active_days_growth", report.activeDays, previous.activeDays ?? 0],
+        ]
+      : [];
     for (const [name, value, before] of dayChecks) {
       if (value !== null && value - before > maxDayGain) {
         reasons.push(`${name}: ${before} → ${value} in ${hours.toFixed(1)}h exceeds +${maxDayGain} days`);

@@ -291,6 +291,12 @@ describe("evaluateReport — metric plausibility", () => {
     expect(week).toMatchObject({ verdict: "reject" });
     if (week.verdict === "reject") expect(week.message).toMatch(/weekOutputTokens/);
   });
+  it("first report carrying day counters after a client without them is not capped", () => {
+    // Older clients reported no streak/active days (stored as 0); upgrading
+    // must not flag the first real counters as impossible growth.
+    const prev = { lifetimeUsd: 31000, lastReportAtMs: NOW - 3_600_000, streakDays: 0, activeDays: 0 };
+    expect(evaluateReport(validReport({ streakDays: 40, activeDays: 103 }), prev, NOW)).toMatchObject({ flagged: false });
+  });
   it("streak / active days may grow by at most (days elapsed + 1) since the previous report", () => {
     const prev = { lifetimeUsd: 31000, lastReportAtMs: NOW - 3_600_000, streakDays: 10, activeDays: 50 }; // 1h → +1
     expect(evaluateReport(validReport({ streakDays: 11, activeDays: 51 }), prev, NOW)).toMatchObject({ flagged: false });
