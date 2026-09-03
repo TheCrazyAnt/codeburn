@@ -3,6 +3,23 @@
 /// filesystem, so this cannot be a JSON file read at runtime the way the CLI's
 /// `src/locales/zh-CN.json` is.
 const zhCN: Record<string, string> = {
+  // 活动分类名由命令行在数据里给出，显示时查表翻译
+  "Coding": "编码",
+  "Debugging": "调试",
+  "Feature Dev": "功能开发",
+  "Refactoring": "重构",
+  "Testing": "测试",
+  "Exploration": "探索",
+  "Planning": "规划",
+  "Delegation": "委派",
+  "Git Ops": "Git 操作",
+  "Conversation": "对话",
+  "Brainstorming": "头脑风暴",
+  "Documentation": "文档",
+  "Review": "审查",
+  "Other": "其他",
+  "Build": "构建",
+  "Deploy": "部署",
   '%1$s %2$d': '%1$s%2$d日',
   '%1$s %2$s %3$d': '%2$s%3$d日 %1$s',
   '%1$s on %2$s': '%1$s（%2$s）',

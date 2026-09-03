@@ -105,7 +105,7 @@ function DeviceView({ payload, isRemote, unit }: { payload?: Payload; isRemote: 
     ? Object.entries(c.providers).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).map(([k, v]) => ({ name: k, value: v, display: usd(v) }))
     : []
   const activityBars: BarItem[] = c
-    ? c.topActivities.filter((a) => a.cost > 0).map((a) => ({ name: a.name, value: a.cost, display: usd(a.cost) }))
+    ? c.topActivities.filter((a) => a.cost > 0).map((a) => ({ name: t(a.name), value: a.cost, display: usd(a.cost) }))
     : []
   // Workflow rides beside Model efficiency only when it carries data. Without
   // it the row is a single full-width Model efficiency panel, so an older peer
@@ -357,7 +357,7 @@ function CombinedView({ devices, unit }: { devices: DeviceUsage[]; unit: Unit })
   const taskBars: BarItem[] = [...activities.entries()]
     .filter(([, v]) => v > 0)
     .sort((a, b) => b[1] - a[1])
-    .map(([k, v]) => ({ name: k, value: v, display: usd(v) }))
+    .map(([k, v]) => ({ name: t(k), value: v, display: usd(v) }))
 
   return (
     <>

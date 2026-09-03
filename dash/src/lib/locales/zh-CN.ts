@@ -6,6 +6,23 @@
 /// here renders as English. Kept in sync with the shared fragment reviewed
 /// alongside src/locales/zh-CN.json.
 const zhCN: Record<string, string> = {
+  // 活动分类名由命令行在数据里给出，显示时查表翻译
+  "Coding": "编码",
+  "Debugging": "调试",
+  "Feature Dev": "功能开发",
+  "Refactoring": "重构",
+  "Testing": "测试",
+  "Exploration": "探索",
+  "Planning": "规划",
+  "Delegation": "委派",
+  "Git Ops": "Git 操作",
+  "Conversation": "对话",
+  "Brainstorming": "头脑风暴",
+  "General": "通用",
+  "Documentation": "文档",
+  "Review": "审查",
+  "Build": "构建",
+  "Deploy": "部署",
   "%1$s %2$s:00": "%1$s %2$s:00",
   "%1$s device · %2$s calls": "%1$s 台设备 · %2$s 次调用",
   "%1$s devices · %2$s calls": "%1$s 台设备 · %2$s 次调用",

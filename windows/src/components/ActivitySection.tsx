@@ -31,7 +31,7 @@ export function ActivitySection({ payload, currency }: Props) {
       {activities.map(a => (
         <div key={a.name} className="data-row">
           <FixedBar fraction={a.cost / maxCost} />
-          <span className="row-name">{a.name}</span>
+          <span className="row-name">{t(a.name)}</span>
           <span className="row-cost" style={{ minWidth: COL_COST }}>{formatCompactCurrency(a.cost, currency)}</span>
           <span className="row-count" style={{ minWidth: COL_COUNT }}>{a.turns}</span>
           <span className="row-oneshot" style={{ minWidth: COL_ONESHOT }}>
