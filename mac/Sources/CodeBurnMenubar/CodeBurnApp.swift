@@ -104,6 +104,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
             NotificationCenter.default.removeObserver(iconStyleObserver)
             self.iconStyleObserver = nil
         }
+        if let currencyObserver {
+            NotificationCenter.default.removeObserver(currencyObserver)
+            self.currencyObserver = nil
+        }
         if let monitor = rightClickMonitor {
             NSEvent.removeMonitor(monitor)
             rightClickMonitor = nil
@@ -173,10 +177,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
     }
 
     private var iconStyleObserver: NSObjectProtocol?
+    private var currencyObserver: NSObjectProtocol?
 
     private func observeMenubarIconStyle() {
         iconStyleObserver = NotificationCenter.default.addObserver(
             forName: MenubarIconStyle.changed,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.refreshStatusButton() }
+        }
+        currencyObserver = NotificationCenter.default.addObserver(
+            forName: CurrencyState.didChange,
             object: nil,
             queue: .main
         ) { [weak self] _ in
