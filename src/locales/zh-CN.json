@@ -598,7 +598,7 @@
   "One-shot rate": "一次成功率",
   "One-time session opener (do NOT add to %s)": "一次性会话开场（不要加进 %s）",
   "One-time session opener (do not add to CLAUDE.md)": "一次性会话开场（不要加进 CLAUDE.md）",
-  "Open %s in your browser and enter this code:": "在浏览器中打开 %s，然后输入这个验证码：",
+  "Open %s in your browser and enter this code:": "在浏览器中打开下面的链接，然后输入这个验证码：\n  %s",
   "Open /mcp in each affected project and disable %s, or manage it in claude.ai Settings > Connectors.": "在每个受影响的项目里打开 /mcp 并停用 %s，或在 claude.ai 的 Settings > Connectors 中管理它。",
   "Open /mcp in each affected project and disable %s, or manage them in claude.ai Settings > Connectors.": "在每个受影响的项目里打开 /mcp 并停用 %s，或在 claude.ai 的 Settings > Connectors 中管理它们。",
   "Open a pairing window and print a PIN to add a new device": "打开配对窗口并显示 PIN，用于添加新设备",
