@@ -905,7 +905,7 @@ struct CapacityDockDetailView: View {
         let cost = scoped?.cost ?? today.cost
         let calls = scoped?.calls ?? today.calls
         return VStack(alignment: .leading, spacing: 0) {
-            sectionCaption(L("Today"), trailing: scoped == nil ? nil : provider.displayName)
+            sectionCaption(L("Today"), trailing: nil)
             HStack(alignment: .center, spacing: 8 * s) {
                 HStack(alignment: .firstTextBaseline, spacing: 5 * s) {
                     Text(cost.asCompactCurrency())
@@ -922,11 +922,15 @@ struct CapacityDockDetailView: View {
                         tokenLine("arrow.down", Double(today.inputTokens))
                         tokenLine("arrow.up", Double(today.outputTokens))
                     }
-                    Text("\(calls.asThousandsSeparated()) calls")
-                        .font(.system(size: 10))
-                        .monospacedDigit()
-                        .foregroundStyle(Color.capacityDockText.opacity(0.6))
-                        .frame(height: 12 * s)
+                    // The per-provider split carries no call count on older
+                    // CLIs (it arrives as 0), so only show calls when present.
+                    if scoped == nil || calls > 0 {
+                        Text("\(calls.asThousandsSeparated()) calls")
+                            .font(.system(size: 10))
+                            .monospacedDigit()
+                            .foregroundStyle(Color.capacityDockText.opacity(0.6))
+                            .frame(height: 12 * s)
+                    }
                 }
             }
             .frame(height: CapacityDockGlance.todayContentHeight * s)
