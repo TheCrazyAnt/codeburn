@@ -9,7 +9,34 @@ import { getProvider } from './providers/index.js'
 import { getClaudeConfigDirs, getDesktopSessionsDirs } from './providers/claude.js'
 import { convertCost, formatCost } from './currency.js'
 import { SUPPORTED_LANGUAGES, getLanguage, isLanguage, resolveLanguage, setLanguage, t, tn } from './i18n.js'
-import { periodLabelForDisplay, renderStatusBar } from './format.js'
+import { displayWidth, formatTokens, padCells, periodLabelForDisplay, renderStatusBar } from './format.js'
+import { renderTable as renderBoxTable, type TableColumn } from './text-table.js'
+import {
+  DEFAULT_LEADERBOARD_BOARD,
+  DEFAULT_LEADERBOARD_LIMIT,
+  DEFAULT_LEADERBOARD_METRIC,
+  LEADERBOARD_BOARDS,
+  LEADERBOARD_METRICS,
+  LeaderboardError,
+  awaitDeviceAuthorization,
+  clearLeaderboardSession,
+  isLeaderboardBoard,
+  isLeaderboardMetric,
+  leaderboardClient,
+  leaderboardErrorMessage,
+  loadReportPayloads,
+  ranksByMetric,
+  readLeaderboardState,
+  reportFromPayloads,
+  requestDeviceCode,
+  resolveLeaderboardServer,
+  updateLeaderboardState,
+  versionSatisfies,
+  type LeaderboardBoard,
+  type LeaderboardMetric,
+  type LeaderboardPage,
+  type LeaderboardState,
+} from './leaderboard.js'
 import { DAILY_CACHE_VERSION, toDateString } from './daily-cache.js'
 import { dateKey } from './day-aggregator.js'
 import { sessionModelBillableOutputTokens } from './session-output.js'
@@ -26,7 +53,7 @@ import { hostname } from 'os'
 import { runShareServer } from './sharing/share-run.js'
 import { addRemote, linkRemote, pullDevices, renderDevices, summarizeDeviceUsage } from './sharing/host.js'
 import { browse } from './sharing/discovery.js'
-import { promptChoice } from './sharing/prompt.js'
+import { promptChoice, promptYesNo } from './sharing/prompt.js'
 import { loadOrCreateIdentity } from './sharing/identity.js'
 import { pairingCode } from './sharing/pairing.js'
 import { ShareController } from './sharing/share-controller.js'
@@ -1418,6 +1445,405 @@ program
       console.error(`\n  ${t('Menubar install failed: %s', message)}\n`)
       process.exit(1)
     }
+  })
+
+// --- leaderboard ------------------------------------------------------------
+// The Windows/Linux half of the opt-in public leaderboard the macOS menubar
+// already ships (mac/Sources/CodeBurnMenubar/Data/LeaderboardService.swift).
+// All logic and HTTP live in src/leaderboard.ts; only rendering and command
+// wiring belong here. Nothing is ever uploaded implicitly: reading the board
+// and `status` are safe signed-out, and only `join` / `upload` send a report.
+
+function leaderboardBoardLabel(board: LeaderboardBoard): string {
+  if (board === 'week') return t('This week')
+  if (board === 'month') return t('This month')
+  return t('Lifetime')
+}
+
+function leaderboardMetricLabel(metric: LeaderboardMetric): string {
+  if (metric === 'output') return t('Output')
+  if (metric === 'streak') return t('Streak')
+  return t('Spend')
+}
+
+function assertLeaderboardChoice(value: string, allowed: readonly string[], flag: string): void {
+  if (allowed.includes(value)) return
+  process.stderr.write(
+    `${t('codeburn leaderboard: unknown %1$s "%2$s". Valid values: %3$s.', flag, value, allowed.join(', '))}\n`
+  )
+  process.exit(1)
+}
+
+/// Board money is USD on the wire; `formatCost` applies the configured display
+/// currency, the same way the macOS popover does.
+function leaderboardRankText(rank: number | null | undefined): string {
+  return typeof rank === 'number' ? `#${rank}` : t('unranked')
+}
+
+function renderLeaderboardBoard(
+  page: LeaderboardPage,
+  opts: { board: LeaderboardBoard; metric: LeaderboardMetric; state: LeaderboardState },
+): string {
+  const { board, metric, state } = opts
+  const mark = (id: LeaderboardMetric, header: string): string => (id === metric ? `${header} ▾` : header)
+  // The server echoes `month` on the lifetime board too (contract: month and
+  // lifetime responses both carry `month`), so only the period boards show it.
+  const periodKey = board === 'lifetime' ? undefined : page.week ?? page.month
+  const boardLabel = leaderboardBoardLabel(board)
+  const metricLabel = leaderboardMetricLabel(metric)
+  const lines: string[] = ['']
+  lines.push(`  ${periodKey
+    ? t('CodeBurn leaderboard — %1$s (%2$s), ranked by %3$s', boardLabel, periodKey, metricLabel)
+    : t('CodeBurn leaderboard — %1$s, ranked by %2$s', boardLabel, metricLabel)}`)
+  lines.push('')
+
+  if (page.entries.length === 0) {
+    lines.push(`  ${t('No one is on this board yet.')}`)
+  } else {
+    const columns: TableColumn[] = [
+      { header: '#', right: true },
+      { header: t('User') },
+      { header: mark('usd', t('Spend')), right: true },
+      { header: mark('output', t('Output')), right: true },
+      { header: mark('streak', t('Streak')), right: true },
+      { header: t('Calls'), right: true },
+      { header: t('Provider') },
+    ]
+    const myLogin = state.login?.toLowerCase()
+    const boldRows = new Set<number>()
+    const rows = page.entries.map((entry, index) => {
+      if (myLogin && entry.login.toLowerCase() === myLogin) boldRows.add(index)
+      return [
+        String(entry.rank),
+        myLogin && entry.login.toLowerCase() === myLogin ? t('%s (you)', entry.login) : entry.login,
+        typeof entry.usd === 'number' ? formatCost(entry.usd) : '-',
+        formatTokens(entry.outputTokens ?? 0),
+        tn('%d day', '%d days', entry.streakDays ?? 0),
+        (entry.calls ?? 0).toLocaleString(),
+        entry.topProvider ?? '-',
+      ]
+    })
+    lines.push(renderBoxTable(columns, rows, { boldRows }))
+    lines.push('')
+  }
+
+  if (typeof page.totalUsers === 'number') lines.push(`  ${tn('%d participant', '%d participants', page.totalUsers)}`)
+  if (page.updatedAt) lines.push(`  ${t('Updated %s', page.updatedAt)}`)
+  if (page.me) {
+    lines.push(`  ${t('You: %1$s · spend %2$s · output %3$s · streak %4$s', leaderboardRankText(page.me.rank), formatCost(page.me.usd ?? 0), formatTokens(page.me.outputTokens ?? 0), tn('%d day', '%d days', page.me.streakDays ?? 0))}`)
+    if (page.me.flagged) lines.push(`  ${t('Your last report was flagged, so you are hidden from the public board.')}`)
+  }
+  if (!state.sessionToken) {
+    lines.push(`  ${t('Not signed in — run `codeburn leaderboard login` to join.')}`)
+  } else if (!state.enabled) {
+    lines.push(`  ${t('Sharing is off — run `codeburn leaderboard join` to appear on the board.')}`)
+  }
+  lines.push('')
+  return lines.join('\n')
+}
+
+function renderLeaderboardFields(fields: Array<[string, string]>): string {
+  const width = Math.max(...fields.map(([label]) => displayWidth(label)))
+  return fields.map(([label, value]) => `  ${padCells(label, width)}   ${value}`).join('\n')
+}
+
+function renderLeaderboardRanks(ranks: ReturnType<typeof ranksByMetric>): string {
+  const columns: TableColumn[] = [
+    { header: t('Ranked by') },
+    { header: t('This week'), right: true },
+    { header: t('This month'), right: true },
+    { header: t('Lifetime'), right: true },
+  ]
+  const rows = LEADERBOARD_METRICS.map(metric => [
+    leaderboardMetricLabel(metric),
+    leaderboardRankText(ranks[metric].week),
+    leaderboardRankText(ranks[metric].month),
+    leaderboardRankText(ranks[metric].lifetime),
+  ])
+  return renderBoxTable(columns, rows)
+}
+
+/// One place that turns a LeaderboardError into terminal output, so no command
+/// prints a stack trace (or, worse, a token-bearing response body).
+async function withLeaderboardErrors(run: () => Promise<void>): Promise<void> {
+  try {
+    await run()
+  } catch (error) {
+    process.stderr.write(`\n  ${leaderboardErrorMessage(error)}\n`)
+    if (error instanceof LeaderboardError) {
+      if (error.kind === 'unauthorized') {
+        process.stderr.write(`  ${t('Run `codeburn leaderboard login` to sign in again.')}\n`)
+      }
+      if (error.kind === 'rate-limited' && error.retryAfterSeconds) {
+        process.stderr.write(`  ${t('Retry after %d seconds.', error.retryAfterSeconds)}\n`)
+      }
+    }
+    process.stderr.write('\n')
+    process.exit(1)
+  }
+}
+
+/// Builds and sends one report. Shared by `join` and `upload` — the only two
+/// commands that transmit anything.
+async function uploadLeaderboardReport(): Promise<void> {
+  const state = await readLeaderboardState()
+  if (!state.sessionToken) {
+    throw new LeaderboardError('not-signed-in', t('Sign in with GitHub first: codeburn leaderboard login'))
+  }
+  if (!state.enabled) {
+    throw new LeaderboardError('not-enabled', t('Sharing is off. Run `codeburn leaderboard join` to opt in.'))
+  }
+  const client = leaderboardClient(state, version)
+  const serverConfig = await client.getConfig()
+  if (serverConfig.minAppVersion && !versionSatisfies(version, serverConfig.minAppVersion)) {
+    throw new LeaderboardError('app-too-old', t('The leaderboard requires CodeBurn %s or newer. Update to keep uploading.', serverConfig.minAppVersion))
+  }
+  console.log(`\n  ${t('Building your report...')}`)
+  const payloads = await loadReportPayloads()
+  const now = new Date()
+  const report = reportFromPayloads({
+    month: payloads.month,
+    lifetime: payloads.lifetime,
+    thirtyDays: payloads.thirtyDays,
+    appVersion: version,
+    now,
+  })
+  let response
+  try {
+    response = await client.postReport(report)
+  } catch (error) {
+    await updateLeaderboardState({ lastUploadError: leaderboardErrorMessage(error) })
+    throw error
+  }
+  await updateLeaderboardState({ lastUploadAt: now.toISOString(), lastUploadError: undefined })
+  console.log(`  ${t('Uploaded %1$s this month and %2$s lifetime.', formatCost(report.monthUSD), formatCost(report.lifetimeUSD))}`)
+  if (response.flagged) {
+    console.log(`  ${t('The server flagged this report, so you stay hidden from the public board.')}`)
+  }
+  console.log('')
+  console.log(renderLeaderboardRanks(ranksByMetric(response.rank)))
+  console.log('')
+}
+
+const leaderboard = program
+  .command('leaderboard')
+  .description(t('Opt-in public leaderboard of AI coding spend (GitHub sign-in; reading is anonymous)'))
+  .option('--board <board>', t('Board to show: week, month, lifetime'), DEFAULT_LEADERBOARD_BOARD)
+  .option('--metric <metric>', t('Rank by: output, usd, streak'), DEFAULT_LEADERBOARD_METRIC)
+  .option('--limit <n>', t('Rows to show (1-100)'), parseInteger, DEFAULT_LEADERBOARD_LIMIT)
+  .option('--format <format>', t('Output format: terminal, json'), 'terminal')
+  .action(async (opts: { board: string; metric: string; limit: number; format: string }) => {
+    assertFormat(opts.format, ['terminal', 'json'], 'leaderboard')
+    assertLeaderboardChoice(opts.board, LEADERBOARD_BOARDS, '--board')
+    assertLeaderboardChoice(opts.metric, LEADERBOARD_METRICS, '--metric')
+    if (!Number.isFinite(opts.limit) || opts.limit < 1 || opts.limit > 100) {
+      process.stderr.write(`${t('codeburn leaderboard: --limit must be an integer from 1 to 100.')}\n`)
+      process.exit(1)
+    }
+    if (!isLeaderboardBoard(opts.board) || !isLeaderboardMetric(opts.metric)) return
+    await withLeaderboardErrors(async () => {
+      const state = await readLeaderboardState()
+      const client = leaderboardClient(state, version)
+      const query = { board: opts.board as LeaderboardBoard, metric: opts.metric as LeaderboardMetric, limit: opts.limit }
+      let page: LeaderboardPage
+      let expired = false
+      try {
+        page = await client.fetchBoard(query)
+      } catch (error) {
+        // A dead session must not hide the public board (the macOS popover
+        // does the same). The client already dropped the stored token.
+        if (!(error instanceof LeaderboardError) || error.kind !== 'unauthorized') throw error
+        expired = true
+        delete state.sessionToken
+        page = await client.fetchBoard({ ...query, authenticated: false })
+      }
+      if (opts.format === 'json') {
+        console.log(JSON.stringify(page, null, 2))
+        return
+      }
+      if (expired) {
+        process.stderr.write(`\n  ${t('Your leaderboard session expired. Sign in again.')}\n`)
+      }
+      console.log(renderLeaderboardBoard(page, { ...query, state }))
+    })
+  })
+
+leaderboard
+  .command('login')
+  .description(t('Sign in with GitHub (device flow) and store a leaderboard session'))
+  .action(async () => {
+    await withLeaderboardErrors(async () => {
+      const state = await readLeaderboardState()
+      if (state.sessionToken) {
+        console.log(`\n  ${t('Already signed in as %s. Run `codeburn leaderboard logout` first to switch accounts.', state.login ?? '?')}\n`)
+        return
+      }
+      const client = leaderboardClient(state, version)
+      const serverConfig = await client.getConfig()
+      if (!serverConfig.githubClientId) {
+        throw new LeaderboardError('device-flow', t('The leaderboard server has no GitHub app configured yet.'))
+      }
+      const deps = { userAgent: `codeburn/${version}` }
+      const code = await requestDeviceCode(serverConfig.githubClientId, deps)
+      const rule = '─'.repeat(code.userCode.length + 4)
+      console.log('')
+      console.log(`  ${t('Open %s in your browser and enter this code:', code.verificationUri)}`)
+      console.log('')
+      console.log(`  ┌${rule}┐`)
+      console.log(`  │  ${code.userCode}  │`)
+      console.log(`  └${rule}┘`)
+      console.log('')
+      console.log(`  ${t('Waiting for you to authorize... (Ctrl-C to cancel)')}`)
+      // Only the server session token is ever stored; the GitHub token is used
+      // once for the exchange and then dropped. Neither is printed.
+      const githubAccessToken = await awaitDeviceAuthorization(serverConfig.githubClientId, code, deps)
+      const session = await client.createSession(githubAccessToken)
+      await updateLeaderboardState({
+        sessionToken: session.sessionToken,
+        login: session.user.login,
+        ...(session.user.avatarUrl ? { avatarUrl: session.user.avatarUrl } : { avatarUrl: undefined }),
+      })
+      console.log('')
+      console.log(`  ${t('Signed in as %s.', session.user.login)}`)
+      console.log(`  ${t('Run `codeburn leaderboard join` to start sharing your totals.')}`)
+      console.log('')
+    })
+  })
+
+leaderboard
+  .command('join')
+  .description(t('Opt in to sharing your aggregate totals, and upload them now'))
+  .action(async () => {
+    await withLeaderboardErrors(async () => {
+      const state = await readLeaderboardState()
+      if (!state.sessionToken) {
+        throw new LeaderboardError('not-signed-in', t('Sign in with GitHub first: codeburn leaderboard login'))
+      }
+      await updateLeaderboardState({ enabled: true })
+      console.log(`\n  ${t('Sharing is on. Only aggregate numbers are uploaded: spend, tokens, calls, streak — never project names, prompts or file paths.')}`)
+      await uploadLeaderboardReport()
+    })
+  })
+
+leaderboard
+  .command('leave')
+  .description(t('Stop sharing (stays signed in, uploads nothing further)'))
+  .action(async () => {
+    await withLeaderboardErrors(async () => {
+      await updateLeaderboardState({ enabled: false })
+      console.log(`\n  ${t('Sharing is off. Your existing board entry stays until you run `codeburn leaderboard delete`.')}\n`)
+    })
+  })
+
+leaderboard
+  .command('upload')
+  .description(t('Build and send your report now, then show the resulting ranks'))
+  .action(async () => {
+    await withLeaderboardErrors(uploadLeaderboardReport)
+  })
+
+leaderboard
+  .command('status')
+  .description(t('Show the signed-in account, sharing state, last upload and your ranks'))
+  .action(async () => {
+    await withLeaderboardErrors(async () => {
+      const state = await readLeaderboardState()
+      const fields: Array<[string, string]> = [
+        [t('Server'), resolveLeaderboardServer(state)],
+        [t('Account'), state.login ? state.login : t('not signed in')],
+        [t('Sharing'), state.enabled ? t('on') : t('off')],
+        [t('Last upload'), state.lastUploadAt ?? t('never')],
+      ]
+      if (state.lastUploadError) fields.push([t('Last error'), state.lastUploadError])
+      console.log('')
+      console.log(renderLeaderboardFields(fields))
+      if (!state.sessionToken) {
+        console.log('')
+        console.log(`  ${t('Not signed in — run `codeburn leaderboard login` to join.')}`)
+        console.log('')
+        return
+      }
+      // Ranks come from each board's authenticated `me` block; limit=1 keeps
+      // the three reads cheap.
+      const client = leaderboardClient(state, version)
+      const pages = await Promise.all(LEADERBOARD_BOARDS.map(async board => {
+        try {
+          return await client.fetchBoard({ board, metric: DEFAULT_LEADERBOARD_METRIC, limit: 1 })
+        } catch (error) {
+          return leaderboardErrorMessage(error)
+        }
+      }))
+      const rankFields: Array<[string, string]> = []
+      pages.forEach((page, index) => {
+        const board = LEADERBOARD_BOARDS[index]!
+        rankFields.push([
+          leaderboardBoardLabel(board),
+          typeof page === 'string' ? page : leaderboardRankText(page.me?.rank),
+        ])
+      })
+      console.log('')
+      console.log(`  ${t('Your rank by %s', leaderboardMetricLabel(DEFAULT_LEADERBOARD_METRIC))}`)
+      console.log(renderLeaderboardFields(rankFields))
+      console.log('')
+    })
+  })
+
+leaderboard
+  .command('logout')
+  .description(t('Revoke this device\'s leaderboard session and forget it locally'))
+  .action(async () => {
+    await withLeaderboardErrors(async () => {
+      const state = await readLeaderboardState()
+      if (!state.sessionToken) {
+        console.log(`\n  ${t('Not signed in.')}\n`)
+        return
+      }
+      const client = leaderboardClient(state, version)
+      // Best effort: the local session is dropped either way.
+      try {
+        await client.logout()
+      } catch {
+        // An already-revoked or unreachable session still gets cleared below.
+      }
+      await clearLeaderboardSession()
+      console.log(`\n  ${t('Signed out. Your board entry stays until you run `codeburn leaderboard delete`.')}\n`)
+    })
+  })
+
+leaderboard
+  .command('delete')
+  .description(t('Permanently delete your leaderboard account and all its rows'))
+  .option('--yes', t('Skip the confirmation prompt'))
+  .action(async (opts: { yes?: boolean }) => {
+    await withLeaderboardErrors(async () => {
+      const state = await readLeaderboardState()
+      if (!state.sessionToken) {
+        throw new LeaderboardError('not-signed-in', t('Sign in with GitHub first: codeburn leaderboard login'))
+      }
+      console.log(`\n  ${t('This deletes your leaderboard account, every weekly and monthly row, and the report log. It cannot be undone.')}`)
+      // 60 s ceiling so a non-interactive run aborts instead of hanging.
+      const confirmed = opts.yes || await promptYesNo(`  ${t('Delete the leaderboard data for %s?', state.login ?? '?')}`, 60_000)
+      if (!confirmed) {
+        console.log(`\n  ${t('Cancelled.')}\n`)
+        return
+      }
+      const client = leaderboardClient(state, version)
+      try {
+        await client.deleteMe()
+      } catch (error) {
+        // A dead session means there is nothing left server-side to keep.
+        if (!(error instanceof LeaderboardError) || error.kind !== 'unauthorized') throw error
+      }
+      await updateLeaderboardState({
+        sessionToken: undefined,
+        login: undefined,
+        avatarUrl: undefined,
+        enabled: false,
+        lastUploadAt: undefined,
+        lastUploadError: undefined,
+      })
+      console.log(`\n  ${t('Deleted. You are signed out and sharing is off.')}\n`)
+    })
   })
 
 program

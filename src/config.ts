@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir, rename } from 'fs/promises'
+import { readFile, writeFile, mkdir, rename, chmod } from 'fs/promises'
 import { join } from 'path'
 import { homedir } from 'os'
 import { randomBytes } from 'crypto'
@@ -76,6 +76,22 @@ export type CodeburnConfig = {
   // Matched against the canonical project path: prefix on a path-segment
   // boundary, case-insensitive, trailing-slash and backslash tolerant.
   proxyPaths?: string[]
+  // Opt-in public leaderboard (see src/leaderboard.ts and the shared contract
+  // in scratchpad/leaderboard/API.md). `sessionToken` is a bearer credential
+  // issued by the leaderboard server in exchange for a GitHub device-flow
+  // token — it is the reason saveConfig tightens config.json to 0600 below.
+  // `enabled` is the opt-in flag: uploads happen only on the explicit
+  // `leaderboard join` / `leaderboard upload` commands, and only when true.
+  leaderboard?: {
+    sessionToken?: string
+    login?: string
+    avatarUrl?: string
+    enabled?: boolean
+    lastUploadAt?: string
+    lastUploadError?: string
+    /// Overrides the default server; CODEBURN_LEADERBOARD_SERVER wins over it.
+    server?: string
+  }
 }
 
 function getConfigDir(): string {
@@ -103,8 +119,18 @@ export async function saveConfig(config: CodeburnConfig): Promise<void> {
   // staging file. The previous fixed `.tmp` suffix could leave one
   // process reading partial bytes the other was mid-writing.
   const tmpPath = `${configPath}.${randomBytes(8).toString('hex')}.tmp`
-  await writeFile(tmpPath, JSON.stringify(config, null, 2) + '\n', 'utf-8')
+  // config.json used to be written with the default umask mode (usually 0644).
+  // Since it can now hold a leaderboard session token — a bearer credential —
+  // make it owner-only whenever one is present, the same posture as the
+  // sharing store's token files. The mode travels with the staged file through
+  // the rename (the temp path is always fresh, so `mode` really applies), and
+  // the explicit chmod also tightens a config.json left 0644 by an older
+  // version. Token-free configs keep the previous, permissive mode so nothing
+  // else changes for users who never touch the leaderboard.
+  const hasSecret = Boolean(config.leaderboard?.sessionToken)
+  await writeFile(tmpPath, JSON.stringify(config, null, 2) + '\n', hasSecret ? { encoding: 'utf-8', mode: 0o600 } : 'utf-8')
   await rename(tmpPath, configPath)
+  if (hasSecret) await chmod(configPath, 0o600).catch(() => {})
 }
 
 export async function readPlan(): Promise<Plan | undefined> {
