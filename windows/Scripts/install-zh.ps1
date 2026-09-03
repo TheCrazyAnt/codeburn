@@ -37,7 +37,7 @@ if ([int]$nodeParts[0] -lt 22 -or ([int]$nodeParts[0] -eq 22 -and [int]$nodePart
 Say "查询最新版本 ($Repo) ..."
 $headers = @{ 'Accept' = 'application/vnd.github+json'; 'User-Agent' = 'codeburn-zh-installer' }
 try {
-  $releases = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases?per_page=30" -Headers $headers
+  $releases = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases?per_page=100" -Headers $headers
 } catch {
   Die "无法访问 GitHub Releases：$($_.Exception.Message)"
 }

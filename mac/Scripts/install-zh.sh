@@ -15,7 +15,7 @@
 set -euo pipefail
 
 REPO="${CODEBURN_ZH_REPO:-TheCrazyAnt/codeburn}"
-API="https://api.github.com/repos/${REPO}/releases?per_page=30"
+API="https://api.github.com/repos/${REPO}/releases?per_page=100"
 APPS="${HOME}/Applications"
 BUNDLE="${APPS}/CodeBurnMenubar.app"
 EXE="CodeBurnMenubar"
