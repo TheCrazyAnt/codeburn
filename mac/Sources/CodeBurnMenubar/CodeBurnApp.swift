@@ -57,6 +57,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
     private var popover: NSPopover!
     private var capacityDockController: CapacityDockController?
     private var rightClickMonitor: Any?
+    /// Closes the popover on any click outside it. `.transient` relies on
+    /// AppKit noticing the outside interaction, which is unreliable for an
+    /// accessory app whose popover anchors to a status item (clicks into an
+    /// already-active app can leave it open), so watch mouse-downs directly.
+    /// Global monitors never see clicks in this app's own windows, so the
+    /// popover content, the status item and Capacity Dock are unaffected.
+    private var popoverOutsideClickMonitor: Any?
     private var lastContextMenuPresentedAt: Date = .distantPast
     /// Held only while the right-click menu is open. Cleared in menuDidClose so
     /// left-click goes back to the popover action instead of re-showing the menu.
@@ -107,6 +114,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
             NotificationCenter.default.removeObserver(iconStyleObserver)
             self.iconStyleObserver = nil
         }
+        removePopoverOutsideClickMonitor()
         if let currencyObserver {
             NotificationCenter.default.removeObserver(currencyObserver)
             self.currencyObserver = nil
@@ -1429,6 +1437,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
 
     // MARK: - Popover
 
+    private func installPopoverOutsideClickMonitor() {
+        removePopoverOutsideClickMonitor()
+        popoverOutsideClickMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        ) { [weak self] _ in
+            guard let self, self.popover.isShown else { return }
+            DispatchQueue.main.async { self.popover.performClose(nil) }
+        }
+    }
+
+    private func removePopoverOutsideClickMonitor() {
+        if let monitor = popoverOutsideClickMonitor {
+            NSEvent.removeMonitor(monitor)
+            popoverOutsideClickMonitor = nil
+        }
+    }
+
     private func setupPopover() {
         popover = NSPopover()
         popover.contentSize = NSSize(width: popoverWidth, height: popoverHeight)
@@ -1468,6 +1493,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
             // reach the SwiftUI content.
             store.menuPopoverVisible = true
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            installPopoverOutsideClickMonitor()
             if let window = popover.contentViewController?.view.window {
                 // Pin the popover's window above the status-bar layer but tag
                 // it as auxiliary so macOS Tahoe does not treat it as an
@@ -1681,6 +1707,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
 
     func popoverDidClose(_ notification: Notification) {
         store.menuPopoverVisible = false
+        removePopoverOutsideClickMonitor()
         // Catch up on any menubar title updates that were skipped while the
         // popover was anchored.
         refreshStatusButton()

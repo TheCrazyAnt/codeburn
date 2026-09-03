@@ -883,7 +883,7 @@ struct CapacityDockDetailView: View {
             sectionCaption(L("Today"), trailing: nil)
             HStack(alignment: .center, spacing: 8 * s) {
                 HStack(alignment: .firstTextBaseline, spacing: 5 * s) {
-                    Text(today.cost.asUSD())
+                    Text(today.cost.asCompactCurrency())
                         .font(.system(size: 17, weight: .semibold))
                         .monospacedDigit()
                         .foregroundStyle(Color.capacityDockText)
@@ -990,7 +990,7 @@ struct CapacityDockDetailView: View {
     private func budgetLine() -> some View {
         let spend = store.capacityDockToday?.cost ?? 0
         let budget = store.activeDailyBudget
-        Text(budget > 0 ? L("today \(spend.asUSD()) of \(budget.asUSD())") : L("no budget set"))
+        Text(budget > 0 ? L("today \(spend.asCompactCurrency()) of \(budget.asCompactCurrency())") : L("no budget set"))
             .font(.system(size: 11))
             .monospacedDigit()
             .foregroundStyle(Color.capacityDockText.opacity(0.6))

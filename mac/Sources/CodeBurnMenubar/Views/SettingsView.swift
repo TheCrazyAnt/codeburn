@@ -108,7 +108,7 @@ struct SettingsView: View {
             List(selection: selection) {
                 Section {
                     SettingsSidebarPaneRow(pane: "general", title: L("General"), systemImage: "gearshape.fill", color: .gray)
-                    SettingsSidebarPaneRow(pane: "leaderboard", title: L("Leaderboard"), systemImage: "trophy.fill", color: .orange)
+                    SettingsSidebarPaneRow(pane: "leaderboard", title: L("Leaderboard"), systemImage: "trophy.fill", color: .gray)
                     SettingsSidebarAboutRow()
                 }
                 Section {
