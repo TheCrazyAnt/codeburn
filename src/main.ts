@@ -8,6 +8,7 @@ import { allProviderNames, getAllProviders } from './providers/index.js'
 import { getProvider } from './providers/index.js'
 import { getClaudeConfigDirs, getDesktopSessionsDirs } from './providers/claude.js'
 import { convertCost, formatCost } from './currency.js'
+import { SUPPORTED_LANGUAGES, getLanguage, isLanguage, resolveLanguage, setLanguage, t } from './i18n.js'
 import { renderStatusBar } from './format.js'
 import { DAILY_CACHE_VERSION, toDateString } from './daily-cache.js'
 import { dateKey } from './day-aggregator.js'
@@ -505,6 +506,9 @@ program.hook('preAction', async (thisCommand) => {
   if (thisCommand.opts<{ verbose?: boolean }>().verbose) {
     process.env['CODEBURN_VERBOSE'] = '1'
   }
+  // Language before any UI renders: env override, then the stored config,
+  // then the system locale (see src/i18n.ts).
+  setLanguage(resolveLanguage({ configured: config.lang }))
   await loadCurrency()
 })
 
@@ -1462,6 +1466,43 @@ program
     console.log(`  Symbol: ${symbol}`)
     console.log(`  Rate: 1 USD = ${rate} ${upperCode}`)
     console.log(`  Config saved to ${getConfigFilePath()}\n`)
+  })
+
+program
+  .command('lang [code]')
+  .description(`Set the interface language (${SUPPORTED_LANGUAGES.join(', ')}; e.g. codeburn lang zh-CN)`)
+  .option('--reset', 'Follow the system locale again')
+  .action(async (code?: string, opts?: { reset?: boolean }) => {
+    if (opts?.reset) {
+      const config = await readConfig()
+      delete config.lang
+      await saveConfig(config)
+      setLanguage(resolveLanguage({ configured: undefined }))
+      console.log(`\n  Language follows the system locale (now ${getLanguageLabel()}).`)
+      console.log(`  Config: ${getConfigFilePath()}\n`)
+      return
+    }
+
+    if (!code) {
+      const config = await readConfig()
+      console.log(`\n  Language: ${getLanguageLabel()}${config.lang ? '' : ' (from system locale)'}`)
+      console.log(`  Available: ${SUPPORTED_LANGUAGES.join(', ')}`)
+      console.log(`  Config: ${getConfigFilePath()}\n`)
+      return
+    }
+
+    if (!isLanguage(code)) {
+      console.error(`\n  "${code}" is not a supported language. Available: ${SUPPORTED_LANGUAGES.join(', ')}\n`)
+      process.exitCode = 1
+      return
+    }
+
+    const config = await readConfig()
+    config.lang = code
+    await saveConfig(config)
+    setLanguage(code)
+    console.log(`\n  ${t('Language set to %s.', getLanguageLabel())}`)
+    console.log(`  ${t('Config saved to %s', getConfigFilePath())}\n`)
   })
 
 program
@@ -2643,4 +2684,10 @@ if (process.argv[2] === 'serve') {
   const program = buildProgram()
   await registerLoadedPluginCommands(program)
   program.parse()
+}
+
+/// Human-readable name of the active language, in that language.
+function getLanguageLabel(): string {
+  const labels: Record<string, string> = { en: 'English', 'zh-CN': '简体中文 (zh-CN)' }
+  return labels[getLanguage()] ?? getLanguage()
 }

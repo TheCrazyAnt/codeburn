@@ -27,6 +27,9 @@ export type CodeburnConfig = {
     code: string
     symbol?: string
   }
+  /// UI language for the CLI, the web dashboard and the Windows tray app.
+  /// Absent means "follow the system locale"; see src/i18n.ts.
+  lang?: string
   devin?: {
     acuUsdRate?: number
   }

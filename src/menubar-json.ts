@@ -87,6 +87,7 @@ export type ProviderCost = {
 }
 import type { OptimizeResult } from './optimize.js'
 import { getCurrency } from './currency.js'
+import { getLanguage } from './i18n.js'
 import type { GranularHistory } from './granular-history.js'
 import { getShortModelName } from './models.js'
 import type { ReworkedFile } from './workflow-insights.js'
@@ -390,6 +391,10 @@ export type MenubarPayload = {
   /// multiplies by `rate` and prefixes `symbol` at display time. USD =
   /// { code: 'USD', symbol: '$', rate: 1 }.
   currency: { code: string; symbol: string; rate: number }
+  /// Active UI language, so clients that render their own chrome (the web
+  /// dashboard, the Windows tray app) follow `codeburn lang` without reading
+  /// the config file themselves. Optional for older clients.
+  lang?: string
   combined?: CombinedUsage
   claudeConfigs?: ClaudeConfigSelector
 }
@@ -618,6 +623,7 @@ export function buildMenubarPayload(
       const c = getCurrency()
       return { code: c.code, symbol: c.symbol, rate: c.rate }
     })(),
+    lang: getLanguage(),
   }
   if (claudeConfigs && claudeConfigs.options.length > 1) {
     payload.claudeConfigs = claudeConfigs
