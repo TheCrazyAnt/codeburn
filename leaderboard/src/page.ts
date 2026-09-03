@@ -77,11 +77,11 @@ export const LEADERBOARD_HTML = `<!doctype html>
   </div>
   <div class="toolbar">
     <div class="tabs" role="tablist" aria-label="排名依据">
-      <button role="tab" id="metric-output" aria-selected="true" data-metric="output">产出</button>
-      <button role="tab" id="metric-usd" aria-selected="false" data-metric="usd">花费</button>
+      <button role="tab" id="metric-output" aria-selected="false" data-metric="output">产出</button>
+      <button role="tab" id="metric-usd" aria-selected="true" data-metric="usd">花费</button>
       <button role="tab" id="metric-streak" aria-selected="false" data-metric="streak">活跃</button>
     </div>
-    <div class="meta">排名依据：<span id="metric-name">产出 (tokens)</span></div>
+    <div class="meta">排名依据：<span id="metric-name">花费 (USD)</span></div>
   </div>
   <div class="card">
     <table aria-live="polite">
@@ -98,7 +98,7 @@ export const LEADERBOARD_HTML = `<!doctype html>
 <script>
 (function () {
   var board = "month";
-  var metric = "output";
+  var metric = "usd";
   var METRICS = {
     output: { label: "产出", head: "产出 (tokens)", format: function (v) { return compact.format(v || 0); } },
     usd: { label: "花费", head: "花费 (USD)", format: function (v) { return "$" + usdFmt.format(v || 0); } },

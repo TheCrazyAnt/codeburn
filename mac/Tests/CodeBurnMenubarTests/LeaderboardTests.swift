@@ -405,12 +405,12 @@ struct LeaderboardTests {
         }
     }
 
-    @Test("metrics are output, usd, streak with output as the default")
+    @Test("metrics are output, usd, streak with spend as the default")
     @MainActor
     func metricOrderAndFormat() {
         #expect(LeaderboardMetric.allCases == [.output, .usd, .streak])
         #expect(LeaderboardMetric.allCases.map(\.rawValue) == ["output", "usd", "streak"])
-        #expect(LeaderboardMetric.default == .output)
+        #expect(LeaderboardMetric.default == .usd)
         #expect(LeaderboardMetric.output.format(1_234_567) == "1.2M")
         #expect(LeaderboardMetric.output.format(340_000) == "340K")
         #expect(LeaderboardMetric.streak.format(7) == L("\(7) days"))

@@ -268,9 +268,9 @@ private struct LeaderboardUploadRow: View {
             }
             HStack(spacing: 16) {
                 // Ranks on the default board metric (output tokens).
-                rankLabel(L("This week"), leaderboard.myRank[.output].week)
-                rankLabel(L("This month"), leaderboard.myRank[.output].month)
-                rankLabel(L("Lifetime"), leaderboard.myRank[.output].lifetime)
+                rankLabel(L("This week"), leaderboard.myRank[LeaderboardMetric.default].week)
+                rankLabel(L("This month"), leaderboard.myRank[LeaderboardMetric.default].month)
+                rankLabel(L("Lifetime"), leaderboard.myRank[LeaderboardMetric.default].lifetime)
                 if leaderboard.lastReportFlagged {
                     Label(L("Hidden from public boards pending review"), systemImage: "eye.slash")
                         .font(.system(size: 11))

@@ -150,11 +150,11 @@ describe("basics", () => {
     expect(html).toContain("本月");
     expect(html).toContain("累计");
     expect(html.indexOf('data-board="week"')).toBeLessThan(html.indexOf('data-board="month"'));
-    // metric toggle: 产出 (default) / 花费 / 活跃
+    // metric toggle: 产出 / 花费 (default) / 活跃
     expect(html).toContain('data-metric="output"');
     expect(html).toContain('data-metric="usd"');
     expect(html).toContain('data-metric="streak"');
-    expect(html).toMatch(/id="metric-output" aria-selected="true"/);
+    expect(html).toMatch(/id="metric-usd" aria-selected="true"/);
     expect(html).toContain("&metric=");
     expect(html).toContain("https://github.com/TheCrazyAnt/codeburn");
     expect(html).toContain("/v1/leaderboard?board=");

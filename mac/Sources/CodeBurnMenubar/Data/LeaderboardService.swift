@@ -48,7 +48,7 @@ enum LeaderboardMetric: String, CaseIterable, Identifiable, Sendable {
     /// Consecutive active days (a per-user scalar, the same on every period board).
     case streak
 
-    static let `default`: LeaderboardMetric = .output
+    static let `default`: LeaderboardMetric = .usd
     /// UserDefaults key the popover remembers its metric under.
     static let defaultsKey = "CodeBurnLeaderboardMetric"
 

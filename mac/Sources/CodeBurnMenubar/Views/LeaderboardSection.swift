@@ -37,9 +37,9 @@ struct LeaderboardSection: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .controlSize(.small)
-                .frame(maxWidth: 200)
+                .fixedSize()
 
-                Spacer()
+                Spacer(minLength: 6)
 
                 if let page = leaderboard.boards[key], let total = page.totalUsers {
                     Text(L("\(total) players"))
@@ -47,6 +47,17 @@ struct LeaderboardSection: View {
                         .foregroundStyle(.tertiary)
                         .monospacedDigit()
                 }
+
+                // Metric as a compact dropdown on the same row.
+                Picker("", selection: metricBinding) {
+                    ForEach(LeaderboardMetric.allCases) { metric in
+                        Text(metric.displayName).tag(metric)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .controlSize(.small)
+                .fixedSize()
 
                 Button {
                     Task { await leaderboard.loadBoard(board, metric: metric, force: true) }
@@ -64,16 +75,6 @@ struct LeaderboardSection: View {
                 .help("Refresh leaderboard")
                 .disabled(leaderboard.loadingBoards.contains(key))
             }
-
-            Picker("", selection: metricBinding) {
-                ForEach(LeaderboardMetric.allCases) { metric in
-                    Text(metric.displayName).tag(metric)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .controlSize(.small)
-            .frame(maxWidth: 200)
 
             if !leaderboard.isParticipating {
                 joinCard
