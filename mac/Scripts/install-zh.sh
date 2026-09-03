@@ -27,7 +27,11 @@ done
 say() { printf '▸ %s\n' "$*"; }
 die() { printf '✗ %s\n' "$*" >&2; exit 1; }
 
-[[ "$(uname -s)" == "Darwin" ]] || die "这个脚本只支持 macOS。Windows 请用 windows/Scripts/install-zh.ps1，Linux 只装命令行即可。"
+# 命令行是跨平台的，所以 --cli-only 在 Linux 上也放行；只有菜单栏应用是 macOS 专属。
+if [[ "$(uname -s)" != "Darwin" ]]; then
+  [[ "${CLI_ONLY}" == "1" ]] || die "这个脚本的菜单栏应用部分只支持 macOS。Windows 请用 windows/Scripts/install-zh.ps1；Linux 加 --cli-only 只装命令行。"
+  command -v python3 >/dev/null 2>&1 || die "需要 python3 来解析 GitHub Releases。"
+fi
 
 command -v npm >/dev/null 2>&1 || die "没有找到 npm。请先安装 Node.js 22.13 或更高版本：https://nodejs.org"
 NODE_MAJOR=$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)
