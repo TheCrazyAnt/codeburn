@@ -671,7 +671,7 @@
 "Start the Antigravity app, then click Try Again." = "请启动 Antigravity 应用，然后点击“重试”。";
 "Start the local %@ service, then click Retry." = "启动本地 %@ 服务，然后点击“重试”。";
 "Stats" = "统计";
-"Streak" = "活跃";
+"Streak" = "连续活跃";
 "Su" = "日";
 "Subscription" = "订阅";
 "Sun" = "周日";
