@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import { Readable } from 'node:stream'
 import { ProxyAgent, fetch as undiciFetch } from 'undici'
+import { resolveProxyUrlForUrl } from './fetch-utils.js'
 
 import { getCodeburnCacheDir } from './cache-dir.js'
 import {
@@ -117,25 +118,7 @@ class HttpStatusError extends Error {
   }
 }
 
-export function resolveProxyUrlForUrl(url: string, env: ProxyEnv = process.env): string | undefined {
-  const target = new URL(url)
-  if (matchesNoProxy(target.hostname, env.NO_PROXY ?? env.no_proxy)) return undefined
-  if (target.protocol === 'https:') return env.HTTPS_PROXY ?? env.https_proxy ?? env.HTTP_PROXY ?? env.http_proxy
-  if (target.protocol === 'http:') return env.HTTP_PROXY ?? env.http_proxy
-  return undefined
-}
-
-function matchesNoProxy(hostname: string, noProxy?: string): boolean {
-  if (!noProxy) return false
-  const host = hostname.toLowerCase()
-  return noProxy.split(',').some(entry => {
-    const rule = entry.trim().toLowerCase().split(':')[0]
-    if (!rule) return false
-    if (rule === '*') return true
-    if (rule.startsWith('.')) return host === rule.slice(1) || host.endsWith(rule)
-    return host === rule || host.endsWith(`.${rule}`)
-  })
-}
+export { resolveProxyUrlForUrl }
 
 function fetchWithProxy(url: string, options: FetchOptions = {}) {
   const proxyUrl = resolveProxyUrlForUrl(url)
