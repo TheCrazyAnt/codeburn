@@ -7,49 +7,47 @@
 
 ## 安装
 
-先装命令行（三个平台都需要，它负责读取数据）：
+### macOS
 
-```bash
-npm install -g codeburn
-```
-
-需要 Node.js 22.13 以上。装完就可以直接用了：
-
-```bash
-codeburn          # 终端仪表盘
-codeburn web      # 浏览器仪表盘
-```
-
-### macOS 菜单栏应用（macOS 14+）
+一条命令装好命令行 + 菜单栏应用，并设为中文：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/TheCrazyAnt/codeburn/zh-hans/mac/Scripts/install-zh.sh | bash
 ```
 
-脚本会从本仓库的 [Releases](https://github.com/TheCrazyAnt/codeburn/releases) 下载最新的 `CodeBurnMenubar-*.zip`，校验 SHA-256，安装到 `~/Applications/CodeBurnMenubar.app`，清除 Gatekeeper 隔离标记并启动。
+只要命令行、不要菜单栏应用，在末尾加 `-s -- --cli-only`。菜单栏应用需要 macOS 14 (Sonoma) 以上。
 
-手动安装也可以：到 Releases 下载 zip，解压后把 `CodeBurnMenubar.app` 拖进 `~/Applications`，然后在终端执行一次 `xattr -dr com.apple.quarantine ~/Applications/CodeBurnMenubar.app` 再打开。
+### Windows
 
-### Windows 托盘应用
-
-在 PowerShell 里执行：
+在 PowerShell 里执行，装好命令行 + 托盘应用：
 
 ```powershell
 irm https://raw.githubusercontent.com/TheCrazyAnt/codeburn/zh-hans/windows/Scripts/install-zh.ps1 | iex
 ```
 
-脚本会下载最新的 `.msi`、校验 SHA-256 并安装。也可以到 Releases 页面下载 `windows-v*` 版本的 `.msi` 双击安装。安装包未做代码签名，Windows SmartScreen 首次会拦截，点「更多信息」→「仍要运行」即可。
+只要命令行：`& ([scriptblock]::Create((irm https://raw.githubusercontent.com/TheCrazyAnt/codeburn/zh-hans/windows/Scripts/install-zh.ps1))) -CliOnly`
 
-### Linux
+托盘应用未做代码签名，Windows SmartScreen 首次会拦截，点「更多信息」→「仍要运行」。
 
-用命令行和网页仪表盘即可，两者都已汉化：
+### Linux / 其他
+
+只装命令行即可，终端和网页仪表盘都已汉化：
 
 ```bash
-codeburn          # 终端仪表盘
-codeburn web      # 浏览器仪表盘
+npm install -g https://github.com/TheCrazyAnt/codeburn/releases/download/cli-v0.9.23-zh1/codeburn-0.9.23-zh1.tgz
+codeburn lang zh-CN
 ```
 
-GNOME 桌面还有一个官方扩展（暂未汉化），装法见上游的 [gnome/README.md](gnome/README.md)。
+### 装完怎么用
+
+```bash
+codeburn        # 终端仪表盘
+codeburn web    # 浏览器仪表盘
+```
+
+三个平台都需要 **Node.js 22.13 或更高版本**。安装脚本会校验每个下载文件的 SHA-256。
+
+> ⚠️ 中文版命令行的包名和上游相同（`codeburn`），装上会替换掉英文版。如果之后执行了 `npm update -g codeburn`，会被上游英文版覆盖，重新跑一次安装命令即可。
 
 ## 语言
 
