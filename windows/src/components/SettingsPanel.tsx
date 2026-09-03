@@ -15,7 +15,9 @@ import { ChevronDown, ChevronRight } from './Icons'
 
 export type ThemeChoice = 'system' | 'light' | 'dark'
 
-const GITHUB_URL = 'https://github.com/getagentseal/codeburn'
+const GITHUB_URL = 'https://github.com/TheCrazyAnt/codeburn'
+// MIT 要求保留原作者信息，关于页里给出上游仓库入口。
+const UPSTREAM_URL = 'https://github.com/getagentseal/codeburn'
 
 type Props = {
   onBack: () => void
@@ -144,6 +146,9 @@ export function SettingsPanel({
         <div className="settings-group-label">{t('About')}</div>
         <Row label={`CodeBurn Desktop ${version ? `v${version}` : ''}`} hint={t('Tracks AI coding spend from local session logs. Nothing leaves this machine except the Claude usage check.')}>
           <button type="button" className="btn" onClick={() => openUrl(GITHUB_URL)}>GitHub</button>
+        </Row>
+        <Row label={t('Simplified Chinese build')} hint={t('Based on getagentseal/codeburn by Resham Joshi (iamtoruk) · AgentSeal. MIT License.')}>
+          <button type="button" className="btn" onClick={() => openUrl(UPSTREAM_URL)}>{t('Upstream')}</button>
         </Row>
         <Row label={t('Quit CodeBurn')} hint={t('Removes the tray icon until you launch it again.')}>
           <button type="button" className="btn" onClick={onQuit}>{t('Quit')}</button>

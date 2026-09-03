@@ -4,7 +4,7 @@ import { readSetting, writeSetting } from '../lib/settings'
 import { t } from '../lib/i18n'
 import { StarIcon, XIcon } from './Icons'
 
-const GITHUB_URL = 'https://github.com/getagentseal/codeburn'
+const GITHUB_URL = 'https://github.com/TheCrazyAnt/codeburn'
 
 export function StarBanner() {
   const [dismissed, setDismissed] = useState(() => readSetting('starBannerDismissed') === 'true')

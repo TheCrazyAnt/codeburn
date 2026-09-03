@@ -3,6 +3,9 @@
 /// filesystem, so this cannot be a JSON file read at runtime the way the CLI's
 /// `src/locales/zh-CN.json` is.
 const zhCN: Record<string, string> = {
+  "Simplified Chinese build": "简体中文版",
+  "Based on getagentseal/codeburn by Resham Joshi (iamtoruk) · AgentSeal. MIT License.": "基于 Resham Joshi (iamtoruk) · AgentSeal 的 getagentseal/codeburn 汉化，MIT 许可证。",
+  "Upstream": "上游仓库",
   // 活动分类名由命令行在数据里给出，显示时查表翻译
   "Coding": "编码",
   "Debugging": "调试",

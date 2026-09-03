@@ -2202,7 +2202,7 @@ private struct AboutSettingsTab: View {
                 AboutLinkRow(
                     icon: "chevron.left.slash.chevron.right",
                     title: "GitHub",
-                    url: "https://github.com/getagentseal/codeburn")
+                    url: "https://github.com/TheCrazyAnt/codeburn")
                 AboutLinkRow(
                     icon: "globe",
                     title: L("Website"),
@@ -2210,7 +2210,7 @@ private struct AboutSettingsTab: View {
                 AboutLinkRow(
                     icon: "exclamationmark.bubble",
                     title: L("Issues"),
-                    url: "https://github.com/getagentseal/codeburn/issues")
+                    url: "https://github.com/TheCrazyAnt/codeburn/issues")
             } header: {
                 Text("Links")
             } footer: {
