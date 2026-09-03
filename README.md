@@ -1,3 +1,5 @@
+> 🇨🇳 **中文用户**：本分支提供菜单栏应用的简体中文界面和 Capacity Dock 自动隐藏功能，安装方法见 [README.zh-CN.md](README.zh-CN.md)。
+
 <table align="center">
   <tr>
     <td align="center" valign="middle">

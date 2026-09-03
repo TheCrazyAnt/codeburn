@@ -45,6 +45,7 @@ enum CapacityDockMetrics {
     private static let baseProviderIconSize: CGFloat = 26
     private static let basePercentageTextSize: CGFloat = 17
     private static let baseDetailWidth: CGFloat = 350
+    private static let baseAutoHidePeek: CGFloat = 16
 
     /// Every dock dimension lands on a whole point. Fractional sizes (85%
     /// of 88 is 74.8) made SwiftUI's fitted content disagree with the
@@ -68,6 +69,8 @@ enum CapacityDockMetrics {
     static func ringLabelSpacing(scale: CGFloat) -> CGFloat { points(baseRingLabelSpacing, scale) }
     static func providerIconSize(scale: CGFloat) -> CGFloat { points(baseProviderIconSize, scale) }
     static func percentageTextSize(scale: CGFloat) -> CGFloat { points(basePercentageTextSize, scale) }
+    /// Visible sliver of an auto-hidden rail; the hover target that slides it out.
+    static func autoHidePeek(scale: CGFloat) -> CGFloat { points(baseAutoHidePeek, scale) }
     static func detailWidth(scale: CGFloat) -> CGFloat { points(baseDetailWidth, scale) }
 
     static func railHeight(providerCount: Int, alongPad: CGFloat, scale: CGFloat) -> CGFloat {
@@ -503,7 +506,7 @@ private struct CapacityDockProviderRow: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("\(provider.displayName) usage")
-        .accessibilityValue(headline?.percentLabel ?? "Unknown")
+        .accessibilityValue(headline?.percentLabel ?? L("Unknown"))
         .accessibilityHint("Click to keep Capacity Dock expanded")
     }
 
@@ -727,7 +730,7 @@ struct CapacityDockDetailView: View {
                 .foregroundStyle(Color.capacityDockText)
             Spacer(minLength: 6)
             if let plan, !plan.isEmpty {
-                Text(plan)
+                Text(LR(plan))
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(Color.capacityDockText.opacity(0.6))
                     .lineLimit(1)
@@ -757,7 +760,7 @@ struct CapacityDockDetailView: View {
     private func sessionsSection(_ sessions: [LiveSession]) -> some View {
         let s = model.detailScale
         VStack(alignment: .leading, spacing: 0) {
-            sectionCaption("Sessions", trailing: sessionsTrailing(sessions.count))
+            sectionCaption(L("Sessions"), trailing: sessionsTrailing(sessions.count))
             if !sessions.isEmpty {
                 ScrollView(.vertical) {
                     VStack(spacing: CapacityDockGlance.pillGap * s) {
@@ -779,9 +782,9 @@ struct CapacityDockDetailView: View {
 
     private func sessionsTrailing(_ count: Int) -> String {
         switch count {
-        case 0: return "none running"
-        case 1: return "1 running"
-        default: return "\(count) running"
+        case 0: return L("none running")
+        case 1: return L("1 running")
+        default: return L("\(count) running")
         }
     }
 
@@ -877,7 +880,7 @@ struct CapacityDockDetailView: View {
     private func todaySection(_ today: CurrentBlock) -> some View {
         let s = model.detailScale
         VStack(alignment: .leading, spacing: 0) {
-            sectionCaption("Today", trailing: nil)
+            sectionCaption(L("Today"), trailing: nil)
             HStack(alignment: .center, spacing: 8 * s) {
                 HStack(alignment: .firstTextBaseline, spacing: 5 * s) {
                     Text(today.cost.asUSD())
@@ -962,7 +965,7 @@ struct CapacityDockDetailView: View {
                 font: .system(size: 20, weight: .semibold)
             )
             .frame(height: 24 * s)
-            Text(CapacityDockQuotaPresentation.displayLabel(window.label))
+            Text(LR(CapacityDockQuotaPresentation.displayLabel(window.label)))
                 .font(.system(size: 11))
                 .foregroundStyle(Color.capacityDockText.opacity(0.6))
                 .lineLimit(1)
@@ -987,7 +990,7 @@ struct CapacityDockDetailView: View {
     private func budgetLine() -> some View {
         let spend = store.capacityDockToday?.cost ?? 0
         let budget = store.activeDailyBudget
-        Text(budget > 0 ? "today \(spend.asUSD()) of \(budget.asUSD())" : "no budget set")
+        Text(budget > 0 ? L("today \(spend.asUSD()) of \(budget.asUSD())") : L("no budget set"))
             .font(.system(size: 11))
             .monospacedDigit()
             .foregroundStyle(Color.capacityDockText.opacity(0.6))

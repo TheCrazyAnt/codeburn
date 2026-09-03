@@ -1307,7 +1307,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
                 valueText = compact ? "\(total)\(suffix)" : " \(total)\(suffix)"
             } else if store.displayMetric == .credits, let p = menubarPayload?.current {
                 let credits = formatTokensMenubar((p.codexCredits ?? 0).rounded())
-                valueText = compact ? "\(credits)cr\(suffix)" : " \(credits) credits\(suffix)"
+                valueText = compact ? L("\(credits)cr\(suffix)") : L(" \(credits) credits\(suffix)")
             } else {
                 let fallback = compact ? "$-" : "$—"
                 valueText = compact
@@ -1337,9 +1337,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
 
         button.attributedTitle = composed
         if let shortfall = store.menubarBadgeDeviceShortfall {
-            button.toolTip = "CodeBurn \(menubarPeriod.menubarMetricLabel) · \(shortfall.reachable) of \(shortfall.total) devices reporting"
+            button.toolTip = L("CodeBurn \(menubarPeriod.menubarMetricLabel) · \(shortfall.reachable) of \(shortfall.total) devices reporting")
         } else {
-            button.toolTip = "CodeBurn \(menubarPeriod.menubarMetricLabel)"
+            button.toolTip = L("CodeBurn \(menubarPeriod.menubarMetricLabel)")
         }
 
         persistBadgeStatusFile()
@@ -1468,29 +1468,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
         usageItem.isEnabled = false
         menu.addItem(usageItem)
 
-        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: "")
+        let settingsItem = NSMenuItem(title: L("Settings…"), action: #selector(openSettings), keyEquivalent: "")
         settingsItem.target = self
-        settingsItem.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Settings")
+        settingsItem.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: L("Settings"))
         menu.addItem(settingsItem)
 
-        let dockSettingsItem = NSMenuItem(title: "Capacity Dock Settings…", action: #selector(openCapacityDockSettings), keyEquivalent: "")
+        let dockSettingsItem = NSMenuItem(title: L("Capacity Dock Settings…"), action: #selector(openCapacityDockSettings), keyEquivalent: "")
         dockSettingsItem.target = self
-        dockSettingsItem.image = NSImage(systemSymbolName: "rectangle.trailinghalf.inset.filled.arrow.trailing", accessibilityDescription: "Capacity Dock")
+        dockSettingsItem.image = NSImage(systemSymbolName: "rectangle.trailinghalf.inset.filled.arrow.trailing", accessibilityDescription: L("Capacity Dock"))
         menu.addItem(dockSettingsItem)
 
-        let refreshNow = NSMenuItem(title: "Refresh Now", action: #selector(refreshNowAction), keyEquivalent: "")
+        let refreshNow = NSMenuItem(title: L("Refresh Now"), action: #selector(refreshNowAction), keyEquivalent: "")
         refreshNow.target = self
         menu.addItem(refreshNow)
 
-        let updateItem = NSMenuItem(title: "Check for Updates", action: #selector(checkForUpdates), keyEquivalent: "")
+        let updateItem = NSMenuItem(title: L("Check for Updates"), action: #selector(checkForUpdates), keyEquivalent: "")
         updateItem.target = self
         menu.addItem(updateItem)
 
-        let aboutItem = NSMenuItem(title: "About CodeBurn", action: #selector(openAbout), keyEquivalent: "")
+        let aboutItem = NSMenuItem(title: L("About CodeBurn"), action: #selector(openAbout), keyEquivalent: "")
         aboutItem.target = self
         menu.addItem(aboutItem)
 
-        let quitItem = NSMenuItem(title: "Quit CodeBurn", action: #selector(quitApp), keyEquivalent: "")
+        let quitItem = NSMenuItem(title: L("Quit CodeBurn"), action: #selector(quitApp), keyEquivalent: "")
         quitItem.target = self
         menu.addItem(quitItem)
 
@@ -1531,9 +1531,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
 
     /// One-line "today" summary for the context menu's usage row.
     private func contextMenuUsageSummary() -> String {
-        guard let current = store.todayPayload?.current else { return "Today · no usage yet" }
-        let calls = current.calls == 1 ? "1 call" : "\(current.calls) calls"
-        return "Today · \(current.cost.asCurrency()) · \(calls)"
+        guard let current = store.todayPayload?.current else { return L("Today · no usage yet") }
+        let calls = current.calls == 1 ? L("1 call") : L("\(current.calls) calls")
+        return L("Today · \(current.cost.asCurrency()) · \(calls)")
     }
 
     private var settingsWindowController: NSWindowController?
@@ -1569,7 +1569,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
             backing: .buffered,
             defer: false
         )
-        window.title = "CodeBurn Settings"
+        window.title = L("CodeBurn Settings")
         window.contentViewController = hosting
         window.center()
         window.isReleasedWhenClosed = false
@@ -1608,24 +1608,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
             let alert = NSAlert()
             alert.icon = codeburnAlertIcon()
             if let error = updateChecker.updateError {
-                alert.messageText = "Update Check Failed"
+                alert.messageText = L("Update Check Failed")
                 alert.informativeText = error
                 alert.alertStyle = .warning
             } else if updateChecker.updateAvailable, let latest = updateChecker.latestVersion {
-                alert.messageText = "Update Available"
-                let header = "\(AppVersion.display(latest)) is available (you have \(AppVersion.display(updateChecker.currentVersion)))."
+                alert.messageText = L("Update Available")
+                let header = L("\(AppVersion.display(latest)) is available (you have \(AppVersion.display(updateChecker.currentVersion))).")
                 if updateChecker.cliTooOldForUpdate {
-                    alert.informativeText = "\(header) Your codeburn CLI is too old to install it. First run:\n\n\(updateChecker.cliUpdateCommand)\n\nthen:\n\ncodeburn menubar --force"
+                    alert.informativeText = L("\(header) Your codeburn CLI is too old to install it. First run:\n\n\(updateChecker.cliUpdateCommand)\n\nthen:\n\ncodeburn menubar --force")
                 } else {
-                    alert.informativeText = "\(header) Run:\n\ncodeburn menubar --force"
+                    alert.informativeText = L("\(header) Run:\n\ncodeburn menubar --force")
                 }
                 alert.alertStyle = .informational
             } else {
-                alert.messageText = "Up to Date"
-                alert.informativeText = "You're on the latest version (\(AppVersion.display(updateChecker.currentVersion)))."
+                alert.messageText = L("Up to Date")
+                alert.informativeText = L("You're on the latest version (\(AppVersion.display(updateChecker.currentVersion))).")
                 alert.alertStyle = .informational
             }
-            alert.addButton(withTitle: "OK")
+            alert.addButton(withTitle: L("OK"))
             alert.runModal()
         }
     }

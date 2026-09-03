@@ -110,3 +110,11 @@ Sourced from `~/codeburn-menubar-mac-swiftui.html`. Warm terracotta-ember palett
 - Surface (dark): `#1C1816`
 
 SF Mono for currency values; SF Pro Rounded for hero.
+
+## Simplified Chinese fork (zh-hans branch)
+
+This branch adds a Simplified Chinese localization (`Sources/CodeBurnMenubar/Resources/zh-Hans.lproj`),
+an in-app language picker (Settings › General › Language), and a Capacity Dock auto-hide option.
+Helper scripts live in `Scripts/l10n/` (`extract_keys.py` lists UI strings, `merge_strings.py`
+merges translation fragments and reports untranslated keys). `Scripts/install-zh.sh` installs the
+fork's release; see the root `README.zh-CN.md`.
