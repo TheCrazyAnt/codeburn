@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { Box, Text, render, useApp, useInput, useWindowSize } from 'ink'
 
-import { formatTokens } from './format.js'
+import { displayWidth, formatTokens, truncateToWidth } from './format.js'
+import { t } from './i18n.js'
 import { patchStdoutForWindows } from './ink-win.js'
 import {
   cleanSessionProjectLabel,
@@ -22,15 +23,18 @@ type Column = {
   right?: boolean
 }
 
+// Widths are terminal cells, not characters, so a translated (CJK) header or
+// label neither overflows its column nor loses a character it had room for.
 function truncate(value: string, width: number): string {
   if (width <= 0) return ''
-  if (value.length <= width) return value
-  return width === 1 ? '…' : `${value.slice(0, width - 1)}…`
+  if (displayWidth(value) <= width) return value
+  return width === 1 ? '…' : truncateToWidth(value, width, '…')
 }
 
 function pad(value: string, width: number, right = false): string {
   const text = truncate(value, width)
-  return right ? text.padStart(width) : text.padEnd(width)
+  const fill = ' '.repeat(Math.max(0, width - displayWidth(text)))
+  return right ? fill + text : text + fill
 }
 
 function startedLabel(value: string): string {
@@ -49,14 +53,14 @@ function durationLabel(ms: number): string {
 function columnsFor(width: number): Column[] {
   const usable = Math.max(58, width - 4)
   const fixed: Column[] = [
-    { key: 'started', label: 'STARTED', width: 16 },
-    { key: 'session', label: 'SESSION', width: 26 },
-    { key: 'project', label: 'PROJECT', width: 20 },
-    { key: 'provider', label: 'PROVIDER', width: 9 },
-    { key: 'models', label: 'MODELS', width: 24 },
-    { key: 'cost', label: 'COST', width: 9, right: true },
-    { key: 'calls', label: 'CALLS', width: 7, right: true },
-    { key: 'turns', label: 'TURNS', width: 7, right: true },
+    { key: 'started', label: t('STARTED'), width: 16 },
+    { key: 'session', label: t('SESSION'), width: 26 },
+    { key: 'project', label: t('PROJECT'), width: 20 },
+    { key: 'provider', label: t('PROVIDER'), width: 9 },
+    { key: 'models', label: t('MODELS'), width: 24 },
+    { key: 'cost', label: t('COST'), width: 9, right: true },
+    { key: 'calls', label: t('CALLS'), width: 7, right: true },
+    { key: 'turns', label: t('TURNS'), width: 7, right: true },
   ]
 
   const keep = width >= 150
@@ -128,14 +132,14 @@ function DetailPanel({ row, width }: { row: SessionRow; width: number }) {
   const compact = width < 100
   const tokens = row.inputTokens + row.outputTokens + row.cacheReadTokens + row.cacheWriteTokens
   const context = `${shortSessionId(row.sessionId)}  ·  ${cleanSessionProjectLabel(row.project)}  ·  ${row.provider}  ·  ${sessionModelLabel(row.models)}`
-  const metrics = `${row.calls.toLocaleString('en-US')} calls   ${row.turns.toLocaleString('en-US')} turns   ${durationLabel(row.durationMs)}${compact ? '' : `   ${formatTokens(tokens)} tokens   ${startedLabel(row.startedAt)}`}`
+  const metrics = `${t('%s calls', row.calls.toLocaleString('en-US'))}   ${t('%s turns', row.turns.toLocaleString('en-US'))}   ${durationLabel(row.durationMs)}${compact ? '' : `   ${t('%s tokens', formatTokens(tokens))}   ${startedLabel(row.startedAt)}`}`
   return (
     <Box borderStyle="round" borderColor={BORDER} paddingX={1} flexDirection="column" width={Math.max(58, width - 2)}>
       <Text bold>{truncate(sessionDisplayName(row), Math.max(30, width - 8))}</Text>
       <Text color={MUTED}>{truncate(context, Math.max(30, width - 8))}</Text>
       <Text>
         <Text color={ORANGE} bold>${row.cost.toFixed(2)}</Text>
-        <Text color={MUTED}>{truncate(`  cost   ${metrics}`, Math.max(24, width - 18))}</Text>
+        <Text color={MUTED}>{truncate(`  ${t('cost')}   ${metrics}`, Math.max(24, width - 18))}</Text>
       </Text>
     </Box>
   )
@@ -171,8 +175,8 @@ function SessionsTui({ rows, period, initialProvider }: { rows: SessionRow[]; pe
   const tableColumns = columnsFor(width)
   const totalCost = filtered.reduce((sum, row) => sum + row.cost, 0)
   const help = width < 92
-    ? '↑↓ move  ·  / search  ·  p provider  ·  enter details  ·  q quit'
-    : '↑↓/jk move  ·  pgup/pgdn jump  ·  / search  ·  p provider  ·  enter details  ·  q quit'
+    ? t('↑↓ move  ·  / search  ·  p provider  ·  enter details  ·  q quit')
+    : t('↑↓/jk move  ·  pgup/pgdn jump  ·  / search  ·  p provider  ·  enter details  ·  q quit')
 
   useInput((input, key) => {
     if (searching) {
@@ -214,19 +218,19 @@ function SessionsTui({ rows, period, initialProvider }: { rows: SessionRow[]; pe
   return (
     <Box flexDirection="column" paddingX={1} paddingTop={1} width={width}>
       <Box justifyContent="space-between">
-        <Text><Text color={ORANGE}>●</Text>  <Text bold>Sessions</Text>  <Text color={MUTED}>{period}</Text></Text>
-        <Text color={MUTED}>{filtered.length.toLocaleString('en-US')} sessions  ·  <Text color="white" bold>${totalCost.toFixed(2)}</Text> total</Text>
+        <Text><Text color={ORANGE}>●</Text>  <Text bold>{t('Sessions')}</Text>  <Text color={MUTED}>{period}</Text></Text>
+        <Text color={MUTED}>{t('%s sessions', filtered.length.toLocaleString('en-US'))}{'  ·  '}<Text color="white" bold>${totalCost.toFixed(2)}</Text>{' ' + t('total')}</Text>
       </Box>
       <Box marginTop={1} marginBottom={1}>
-        <Text color={MUTED}>Provider </Text>
-        <Text backgroundColor="#27272A" bold> {provider === 'all' ? 'All providers' : provider} </Text>
-        <Text color={MUTED}>   Search </Text>
-        <Text color={query || searching ? 'white' : MUTED}>{searching ? `/${query}▌` : query || 'press /'}</Text>
-        {query && !searching ? <Text color={MUTED}>  ·  c clear</Text> : null}
+        <Text color={MUTED}>{t('Provider') + ' '}</Text>
+        <Text backgroundColor="#27272A" bold>{` ${provider === 'all' ? t('All providers') : provider} `}</Text>
+        <Text color={MUTED}>{'   ' + t('Search') + ' '}</Text>
+        <Text color={query || searching ? 'white' : MUTED}>{searching ? `/${query}▌` : query || t('press /')}</Text>
+        {query && !searching ? <Text color={MUTED}>{'  ·  c ' + t('clear')}</Text> : null}
       </Box>
 
       <Text color={MUTED} bold>{`  ${headerLine(tableColumns)}`}</Text>
-      <Text color={BORDER}>{'─'.repeat(Math.min(width - 2, headerLine(tableColumns).length + 2))}</Text>
+      <Text color={BORDER}>{'─'.repeat(Math.min(width - 2, displayWidth(headerLine(tableColumns)) + 2))}</Text>
       {visible.map((row, index) => {
         const absoluteIndex = first + index
         const active = absoluteIndex === cursor
@@ -236,7 +240,7 @@ function SessionsTui({ rows, period, initialProvider }: { rows: SessionRow[]; pe
           </Text>
         )
       })}
-      {filtered.length === 0 ? <Text color={MUTED}>  No sessions match this filter.</Text> : null}
+      {filtered.length === 0 ? <Text color={MUTED}>{'  ' + t('No sessions match this filter.')}</Text> : null}
 
       <Box marginTop={1}>
         {selected && showDetails ? <DetailPanel row={selected} width={width} /> : null}

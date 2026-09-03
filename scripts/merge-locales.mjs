@@ -47,10 +47,30 @@ for (const file of readdirSync(dir).filter(f => f.endsWith('.json')).sort()) {
   }
 }
 
-// A placeholder set in the key must survive translation, or the formatter
-// silently drops an argument at runtime.
-const placeholders = s => (s.match(/%(?:\d+\$)?[sdf]/g) ?? []).sort().join(',')
-const mismatched = Object.entries(merged).filter(([k, v]) => placeholders(k) !== placeholders(v))
+// Every argument the key takes must survive translation, or the formatter
+// silently drops one at runtime. A translation may reorder with explicit
+// positions (`%2$s ... %1$s`), which is the whole point of supporting them, so
+// compare argument slots rather than raw text: slot N must exist in the
+// translation and carry the same conversion type as the key's Nth placeholder.
+function slots(text) {
+  const found = new Map()
+  let auto = 0
+  for (const [, position, kind] of text.matchAll(/%(?:(\d+)\$)?([sdf])/g)) {
+    const index = position ? Number(position) - 1 : auto++
+    // A repeated slot is fine as long as it keeps the same type.
+    if (found.has(index) && found.get(index) !== kind) found.set(index, 'conflict')
+    else if (!found.has(index)) found.set(index, kind)
+  }
+  return found
+}
+function argumentsMatch(key, translation) {
+  const a = slots(key)
+  const b = slots(translation)
+  if (a.size !== b.size) return false
+  for (const [index, kind] of a) if (b.get(index) !== kind) return false
+  return true
+}
+const mismatched = Object.entries(merged).filter(([k, v]) => !argumentsMatch(k, v))
 const identity = Object.entries(merged).filter(([k, v]) => k === v)
 
 console.log(`${Object.keys(merged).length} keys, ${conflicts} conflict(s), ${identity.length} untranslated (identity), ${mismatched.length} placeholder mismatch(es)`)

@@ -23,17 +23,18 @@ import { parsePluginManifest, type PluginManifest } from './manifest.js'
 import { readSyncConfig } from '../sync/config.js'
 import { createCredentialStore } from '../sync/credentials.js'
 import { fetchOidcConfig, refreshToken } from '../sync/auth.js'
+import { t } from '../i18n.js'
 
 export function registerPluginCommands(program: Command): void {
   const plugin = program
     .command('plugin')
-    .description('Inspect the plugin socket: list, info, verify (no installation; see docs/sync/README.md for `codeburn plugin add`)')
+    .description(t('Inspect the plugin socket: list, info, verify (no installation; see docs/sync/README.md for `codeburn plugin add`)'))
 
   plugin
     .command('list')
-    .description('List every plugin the loader found, with status (loaded | rejected) and reason for rejections')
-    .option('--dir <path>', 'Override the plugins directory (defaults to ~/.config/codeburn/plugins)')
-    .option('--json', 'Output as machine-readable JSON')
+    .description(t('List every plugin the loader found, with status (loaded | rejected) and reason for rejections'))
+    .option('--dir <path>', t('Override the plugins directory (defaults to ~/.config/codeburn/plugins)'))
+    .option('--json', t('Output as machine-readable JSON'))
     .action(async (opts: { dir?: string; json?: boolean }) => {
       const loads = await loadPlugins(opts.dir)
 
@@ -65,7 +66,7 @@ export function registerPluginCommands(program: Command): void {
       }
 
       if (loads.length === 0) {
-        process.stdout.write(`No plugins found in ${opts.dir ?? defaultPluginsDir()}.\n`)
+        process.stdout.write(t('No plugins found in %s.', opts.dir ?? defaultPluginsDir()) + '\n')
         return
       }
       for (const load of loads) {
@@ -84,9 +85,9 @@ export function registerPluginCommands(program: Command): void {
 
   plugin
     .command('info <name>')
-    .description('Print the full manifest of a loaded plugin plus on-disk payload sections')
-    .option('--dir <path>', 'Override the plugins directory')
-    .option('--json', 'Output as machine-readable JSON')
+    .description(t('Print the full manifest of a loaded plugin plus on-disk payload sections'))
+    .option('--dir <path>', t('Override the plugins directory'))
+    .option('--json', t('Output as machine-readable JSON'))
     .action(async (name: string, opts: { dir?: string; json?: boolean }) => {
       const loads = await loadPlugins(opts.dir)
       const loaded = loads.find((l): l is Extract<typeof l, { status: 'loaded' }> => l.status === 'loaded' && l.manifest.name === name)
@@ -104,32 +105,32 @@ export function registerPluginCommands(program: Command): void {
         }
         process.stdout.write(JSON.stringify(m, null, 2) + '\n')
         if (sections.length > 0) {
-          process.stdout.write(`\non-disk payload sections: ${sections.join(', ')}\n`)
+          process.stdout.write('\n' + t('on-disk payload sections: %s', sections.join(', ')) + '\n')
         } else {
-          process.stdout.write(`\nno on-disk payload sections yet (plugin has not written any).\n`)
+          process.stdout.write('\n' + t('no on-disk payload sections yet (plugin has not written any).') + '\n')
         }
         return
       }
       const rejected = loads.find((l): l is Extract<typeof l, { status: 'rejected' }> => l.status === 'rejected' && l.name === name)
       if (rejected) {
-        process.stderr.write(`Error: Plugin "${name}" is not loaded: ${rejected.reason}\n`)
+        process.stderr.write(t('Error: Plugin "%s" is not loaded: %s', name, rejected.reason) + '\n')
         process.exitCode = 1
         return
       }
-      process.stderr.write(`Error: Plugin "${name}" not found in ${opts.dir ?? defaultPluginsDir()}.\n`)
+      process.stderr.write(t('Error: Plugin "%s" not found in %s.', name, opts.dir ?? defaultPluginsDir()) + '\n')
       process.exitCode = 1
       return
     })
 
   plugin
     .command('verify <name>')
-    .description('Re-run the verification hook for a named plugin and print the result (release-key signing lands in 9b)')
-    .option('--dir <path>', 'Override the plugins directory')
+    .description(t('Re-run the verification hook for a named plugin and print the result (release-key signing lands in 9b)'))
+    .option('--dir <path>', t('Override the plugins directory'))
     .action(async (name: string, opts: { dir?: string }) => {
       const dir = join(opts.dir ?? defaultPluginsDir(), name)
       const manifest = await readManifestForVerify(dir, name)
       if (!manifest) {
-        process.stderr.write(`Error: Plugin "${name}" could not be loaded for verify.\n`)
+        process.stderr.write(t('Error: Plugin "%s" could not be loaded for verify.', name) + '\n')
         process.exitCode = 1
         return
       }
@@ -137,7 +138,7 @@ export function registerPluginCommands(program: Command): void {
       if (result.ok) {
         process.stdout.write(`verified  ${name}@${manifest.version}\n`)
       } else {
-        process.stderr.write(`Error: unverified  ${name}@${manifest.version}  ${result.reason ?? 'verification failed'}\n`)
+        process.stderr.write(`Error: unverified  ${name}@${manifest.version}  ${result.reason ?? t('verification failed')}\n`)
         process.exitCode = 1
         return
       }
@@ -145,8 +146,8 @@ export function registerPluginCommands(program: Command): void {
 
   plugin
     .command('add <source>')
-    .description('Install a plugin from a local path or the org receiver')
-    .option('--dir <path>', 'Override the plugins directory')
+    .description(t('Install a plugin from a local path or the org receiver'))
+    .option('--dir <path>', t('Override the plugins directory'))
     .action(async (source: string, opts: { dir?: string }) => {
       const pluginsDir = opts.dir ?? defaultPluginsDir()
 
@@ -160,12 +161,12 @@ export function registerPluginCommands(program: Command): void {
         } else {
           // Validate plugin name
           if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(source)) {
-            throw new Error(`Invalid plugin name "${source}". Must match [a-z0-9]([a-z0-9-]*[a-z0-9])?`)
+            throw new Error(t('Invalid plugin name "%s". Must match [a-z0-9]([a-z0-9-]*[a-z0-9])?', source))
           }
           await addRemote(source, pluginsDir)
         }
       } catch (err) {
-        process.stderr.write(`Error: ${(err as Error).message}\n`)
+        process.stderr.write(t('Error: %s', (err as Error).message) + '\n')
         process.exitCode = 1
         return
       }
@@ -173,19 +174,19 @@ export function registerPluginCommands(program: Command): void {
 
   plugin
     .command('remove <name>')
-    .description('Remove an installed plugin')
-    .option('--dir <path>', 'Override the plugins directory')
-    .option('--confirm', 'Confirm removal')
+    .description(t('Remove an installed plugin'))
+    .option('--dir <path>', t('Override the plugins directory'))
+    .option('--confirm', t('Confirm removal'))
     .action(async (name: string, opts: { dir?: string, confirm?: boolean }) => {
       const pluginsDir = opts.dir ?? defaultPluginsDir()
       const destDir = join(pluginsDir, name)
       if (!opts.confirm) {
-        process.stderr.write(`Error: Use --confirm to proceed with removal of ${destDir}\n`)
+        process.stderr.write(t('Error: Use --confirm to proceed with removal of %s', destDir) + '\n')
         process.exitCode = 1
         return
       }
       await rm(destDir, { recursive: true, force: true })
-      process.stdout.write(`Plugin "${name}" removed.\n`)
+      process.stdout.write(t('Plugin "%s" removed.', name) + '\n')
     })
 }
 
@@ -194,12 +195,12 @@ export function registerPluginCommands(program: Command): void {
 async function readManifestForVerify(dir: string, name: string): Promise<PluginManifest | null> {
   const { raw, reason } = await readPluginManifestRaw(dir)
   if (reason) {
-    process.stderr.write(`Plugin "${name}": ${reason}\n`)
+    process.stderr.write(t('Plugin "%s": %s', name, reason) + '\n')
     return null
   }
   const parsed = parsePluginManifest(raw, `${name}/codeburn-plugin.json`)
   if (!parsed.ok) {
-    process.stderr.write(`Plugin "${name}": ${parsed.reason}\n`)
+    process.stderr.write(t('Plugin "%s": %s', name, parsed.reason) + '\n')
     return null
   }
   return parsed.manifest
@@ -226,27 +227,27 @@ async function verifyAndInstall(
 ): Promise<string> {
   const { raw, reason } = await readPluginManifestRaw(sourceDir)
   if (reason) {
-    throw new Error(`Could not read manifest from ${sourceDir}: ${reason}`)
+    throw new Error(t('Could not read manifest from %s: %s', sourceDir, reason))
   }
   const parsed = parsePluginManifest(raw, `${sourceDir}/codeburn-plugin.json`)
   if (!parsed.ok) {
-    throw new Error(`Invalid manifest: ${parsed.reason}`)
+    throw new Error(t('Invalid manifest: %s', parsed.reason))
   }
   const manifest = parsed.manifest
   const verified = await verifyPlugin(sourceDir, manifest, env)
   if (!verified.ok) {
-    throw new Error(`Plugin verification failed: ${verified.reason ?? 'unknown reason'}`)
+    throw new Error(t('Plugin verification failed: %s', verified.reason ?? t('unknown reason')))
   }
   const destDir = join(pluginsDir, manifest.name)
   try {
     await stat(destDir)
-    throw new Error(`Plugin "${manifest.name}" already installed at ${destDir}`)
+    throw new Error(t('Plugin "%s" already installed at %s', manifest.name, destDir))
   } catch (err: unknown) {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
   }
   await mkdir(destDir, { recursive: true })
   await copyPluginTree(sourceDir, destDir)
-  process.stdout.write(`Plugin "${manifest.name}@${manifest.version}" installed to ${destDir}\n`)
+  process.stdout.write(t('Plugin "%s" installed to %s', `${manifest.name}@${manifest.version}`, destDir) + '\n')
   return destDir
 }
 
@@ -288,29 +289,29 @@ export async function validateTarEntries(tarFile: string): Promise<void> {
     }
     child.on('exit', (code) => {
       if (code !== 0) {
-        reject(new Error(`Failed to list tarball contents (exit code ${code})`))
+        reject(new Error(t('Failed to list tarball contents (exit code %s)', code)))
         return
       }
       const entries = output.trim().split('\n').filter(Boolean)
       for (const entry of entries) {
         // Reject absolute paths
         if (entry.startsWith('/')) {
-          reject(new Error(`Tarball contains absolute path: ${entry}`))
+          reject(new Error(t('Tarball contains absolute path: %s', entry)))
           return
         }
         // Reject .. path traversal
         if (entry.includes('..')) {
-          reject(new Error(`Tarball contains directory traversal: ${entry}`))
+          reject(new Error(t('Tarball contains directory traversal: %s', entry)))
           return
         }
         // Reject home directory expansion
         if (entry.startsWith('~')) {
-          reject(new Error(`Tarball contains home directory reference: ${entry}`))
+          reject(new Error(t('Tarball contains home directory reference: %s', entry)))
           return
         }
         // Reject backslashes (path separator on Windows, escape char)
         if (entry.includes('\\')) {
-          reject(new Error(`Tarball contains backslash in entry name: ${entry}`))
+          reject(new Error(t('Tarball contains backslash in entry name: %s', entry)))
           return
         }
       }
@@ -324,11 +325,11 @@ export async function validateTarEntries(tarFile: string): Promise<void> {
       verbose.on('error', reject)
       if (verbose.stdout) verbose.stdout.on('data', c => { vout += c.toString('utf8') })
       verbose.on('exit', vcode => {
-        if (vcode !== 0) { reject(new Error(`Failed to list tarball types (exit code ${vcode})`)); return }
+        if (vcode !== 0) { reject(new Error(t('Failed to list tarball types (exit code %s)', vcode))); return }
         for (const line of vout.trim().split('\n').filter(Boolean)) {
           const typeFlag = line[0]
           if (typeFlag !== '-' && typeFlag !== 'd') {
-            reject(new Error(`Tarball contains a non-regular entry (type "${typeFlag}"); only files and directories are allowed`))
+            reject(new Error(t('Tarball contains a non-regular entry (type "%s"); only files and directories are allowed', typeFlag)))
             return
           }
         }
@@ -348,14 +349,14 @@ async function addRemote(name: string, pluginsDir: string): Promise<void> {
   // Read sync config
   const config = readSyncConfig()
   if (!config) {
-    throw new Error('Sync not configured. Run `codeburn sync setup <url>` first.')
+    throw new Error(t('Sync not configured. Run `codeburn sync setup <url>` first.'))
   }
 
   // Refresh token
   const store = createCredentialStore()
   const rt = store.retrieve()
   if (!rt) {
-    throw new Error('No auth token found. Run `codeburn sync setup` to authenticate.')
+    throw new Error(t('No auth token found. Run `codeburn sync setup` to authenticate.'))
   }
 
   const oidc = await fetchOidcConfig(config.issuer)
@@ -379,21 +380,21 @@ async function addRemote(name: string, pluginsDir: string): Promise<void> {
       const json = JSON.parse(body)
       msg = json.error ?? json.message ?? msg
     } catch {}
-    throw new Error(`Failed to fetch plugin manifest: ${msg}`)
+    throw new Error(t('Failed to fetch plugin manifest: %s', msg))
   }
 
   // A manifest is a few hundred bytes; cap the read so a misbehaving server
   // cannot balloon memory before parsing.
   const manifestText = await manifestResp.text()
   if (manifestText.length > 64 * 1024) {
-    throw new Error('Plugin manifest response exceeds 64 KB; refusing')
+    throw new Error(t('Plugin manifest response exceeds 64 KB; refusing'))
   }
   const manifestData = JSON.parse(manifestText) as Record<string, unknown>
   const manifestSha = typeof manifestData.sha256 === 'string' ? manifestData.sha256 : ''
   const manifestSize = typeof manifestData.size === 'number' ? manifestData.size : 0
 
   if (!manifestSha) {
-    throw new Error('Manifest missing sha256')
+    throw new Error(t('Manifest missing sha256'))
   }
 
   // Download tarball
@@ -403,14 +404,14 @@ async function addRemote(name: string, pluginsDir: string): Promise<void> {
   })
 
   if (!downloadResp.ok) {
-    throw new Error(`Failed to download plugin: HTTP ${downloadResp.status}`)
+    throw new Error(t('Failed to download plugin: HTTP %s', downloadResp.status))
   }
 
   // Check content-length
   const contentLength = downloadResp.headers.get('content-length')
   const size = contentLength ? parseInt(contentLength, 10) : 0
   if (size > 50 * 1024 * 1024) {
-    throw new Error(`Plugin tarball exceeds 50 MB limit (${size} bytes)`)
+    throw new Error(t('Plugin tarball exceeds 50 MB limit (%d bytes)', size))
   }
 
   // Download and hash
@@ -418,14 +419,14 @@ async function addRemote(name: string, pluginsDir: string): Promise<void> {
   const bytes = new Uint8Array(buffer)
 
   if (bytes.length > 50 * 1024 * 1024) {
-    throw new Error(`Plugin tarball exceeds 50 MB limit (${bytes.length} bytes)`)
+    throw new Error(t('Plugin tarball exceeds 50 MB limit (%d bytes)', bytes.length))
   }
 
   // Verify sha256
   const headerSha = downloadResp.headers.get('x-codeburn-sha256') || ''
   const computed = createHash('sha256').update(bytes).digest('hex')
   if (computed !== manifestSha || computed !== headerSha) {
-    throw new Error(`Plugin tarball integrity check failed (sha256 mismatch)`)
+    throw new Error(t('Plugin tarball integrity check failed (sha256 mismatch)'))
   }
 
   // Extract to temp dir
@@ -443,7 +444,7 @@ async function addRemote(name: string, pluginsDir: string): Promise<void> {
       child.on('error', reject)
       child.on('exit', (code) => {
         if (code === 0) resolve()
-        else reject(new Error(`tar extraction failed with exit code ${code}`))
+        else reject(new Error(t('tar extraction failed with exit code %s', code)))
       })
     })
 
@@ -457,7 +458,7 @@ async function addRemote(name: string, pluginsDir: string): Promise<void> {
       if (stat_.isDirectory()) {
         pluginRoot = join(tempDir, dirs[0])
       } else {
-        throw new Error('Tarball must contain either a single top-level directory or files at root')
+        throw new Error(t('Tarball must contain either a single top-level directory or files at root'))
       }
     } else if (dirs.length > 1) {
       // Files or multiple dirs at root
@@ -465,23 +466,23 @@ async function addRemote(name: string, pluginsDir: string): Promise<void> {
       if (allFiles.some(f => f.startsWith('codeburn-plugin'))) {
         pluginRoot = tempDir
       } else {
-        throw new Error('Tarball must contain either a single top-level directory or files at root')
+        throw new Error(t('Tarball must contain either a single top-level directory or files at root'))
       }
     } else {
-      throw new Error('Tarball is empty')
+      throw new Error(t('Tarball is empty'))
     }
 
     // Verify manifest name matches requested name
     const { raw, reason } = await readPluginManifestRaw(pluginRoot)
     if (reason) {
-      throw new Error(`Could not read plugin manifest: ${reason}`)
+      throw new Error(t('Could not read plugin manifest: %s', reason))
     }
     const parsed = parsePluginManifest(raw, 'codeburn-plugin.json')
     if (!parsed.ok) {
-      throw new Error(`Invalid plugin manifest: ${parsed.reason}`)
+      throw new Error(t('Invalid plugin manifest: %s', parsed.reason))
     }
     if (parsed.manifest.name !== name) {
-      throw new Error(`Plugin name mismatch: expected "${name}", got "${parsed.manifest.name}"`)
+      throw new Error(t('Plugin name mismatch: expected "%s", got "%s"', name, parsed.manifest.name))
     }
 
     // Install
@@ -505,13 +506,13 @@ export async function registerLoadedPluginCommands(program: Command, loads?: Plu
     for (const commandName of manifest.capabilities.commands) {
       // Collision check: skip if command already exists (built-ins win)
       if (program.commands.some(c => c.name() === commandName)) {
-        process.stderr.write(`plugin "${manifest.name}": command "${commandName}" conflicts with a built-in and was not registered\n`)
+        process.stderr.write(t('plugin "%s": command "%s" conflicts with a built-in and was not registered', manifest.name, commandName) + '\n')
         continue
       }
 
       program
         .command(commandName)
-        .description(`Plugin command from ${manifest.name}@${manifest.version}`)
+        .description(t('Plugin command from %s', `${manifest.name}@${manifest.version}`))
         .allowUnknownOption(true)
         .argument('[args...]')
         .action(async (args: string[]) => {
@@ -519,7 +520,7 @@ export async function registerLoadedPluginCommands(program: Command, loads?: Plu
           try {
             await stat(entryFile)
           } catch {
-            process.stderr.write(`plugin "${manifest.name}": missing commands/${commandName}.mjs\n`)
+            process.stderr.write(t('plugin "%s": missing commands/%s.mjs', manifest.name, commandName) + '\n')
             process.exitCode = 1
             return
           }

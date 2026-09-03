@@ -1,5 +1,6 @@
 import type { Plan, PlanId, PlanProvider } from './config.js'
 import { AI_CREDIT_USD } from './copilot-aiu.js'
+import { t } from './i18n.js'
 
 export const PLAN_PROVIDERS: PlanProvider[] = ['all', 'claude', 'codex', 'cursor', 'grok', 'copilot']
 export const PLAN_IDS: PlanId[] = ['claude-pro', 'claude-max', 'claude-max-5x', 'cursor-pro', 'supergrok', 'supergrok-heavy', 'copilot-pro', 'copilot-pro-plus', 'copilot-max', 'custom', 'none']
@@ -109,8 +110,8 @@ export function planDisplayName(id: PlanId): string {
     case 'copilot-max':
       return 'Copilot Max'
     case 'custom':
-      return 'Custom'
+      return t('Custom')
     case 'none':
-      return 'None'
+      return t('None')
   }
 }

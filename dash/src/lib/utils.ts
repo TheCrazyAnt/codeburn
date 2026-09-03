@@ -1,6 +1,8 @@
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
 
+import { t } from './i18n'
+
 export function cn(...inputs: ClassValue[]): string {
   return twMerge(clsx(inputs))
 }
@@ -60,7 +62,10 @@ const MODEL_LABELS: Record<string, string> = {
 // and lightly clean the rest.
 export function label(key: string): string {
   if (MODEL_LABELS[key]) return MODEL_LABELS[key]
-  if (key === 'Other' || key === 'unknown') return key
+  // Not model ids: the two buckets the aggregator names in prose, so they are
+  // the only labels here that translate.
+  if (key === 'Other') return t('Other')
+  if (key === 'unknown') return t('unknown')
   return key
     .replace(/^gpt-/i, 'GPT-')
     .replace(/-(\d{8,})$/, '')

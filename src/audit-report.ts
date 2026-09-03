@@ -2,6 +2,7 @@ import { isBehavioralCall } from './behavioral-weight.js'
 import { billableOutputTokens, fallbackRawModelDisplayName, getModelCosts, getShortModelName, sanitizeModelForDisplay, type ModelCosts } from './models.js'
 import { getProvider } from './providers/index.js'
 import { formatCost, formatTokens } from './format.js'
+import { t } from './i18n.js'
 import { renderTable, type TableColumn } from './text-table.js'
 import type { ProjectSummary } from './types.js'
 
@@ -164,15 +165,15 @@ export async function aggregateAudit(projects: ProjectSummary[]): Promise<AuditR
 
 export function renderAuditTable(rows: AuditRow[]): string {
   const columns: TableColumn[] = [
-    { header: 'Provider' },
-    { header: 'Model' },
-    { header: 'Calls', right: true },
-    { header: 'Input', right: true },
-    { header: 'Output', right: true },
-    { header: 'Reason', right: true },
-    { header: 'Cache wr', right: true },
-    { header: 'Cache rd', right: true },
-    { header: 'Cost', right: true },
+    { header: t('Provider') },
+    { header: t('Model') },
+    { header: t('Calls'), right: true },
+    { header: t('Input'), right: true },
+    { header: t('Output'), right: true },
+    { header: t('Reason'), right: true },
+    { header: t('Cache wr'), right: true },
+    { header: t('Cache rd'), right: true },
+    { header: t('Cost'), right: true },
   ]
 
   const body = rows.map((r) => [
@@ -200,7 +201,7 @@ export function renderAuditTable(rows: AuditRow[]): string {
     { calls: 0, input: 0, output: 0, reason: 0, cacheWrite: 0, cacheRead: 0, cost: 0 },
   )
   body.push([
-    'Total',
+    t('Total'),
     '',
     totals.calls.toLocaleString(),
     formatTokens(totals.input),
@@ -214,11 +215,11 @@ export function renderAuditTable(rows: AuditRow[]): string {
   const table = renderTable(columns, body, { boldRows: new Set([body.length - 1]) })
   const legend = [
     '',
-    'Columns are the raw token fields each provider records. codeburn then normalizes for pricing:',
-    '  - Reason folds into Output (priced output = output + reasoning), except copilot, whose reasoning is already inside its output',
-    '  - Cache rd = max(Anthropic cacheReadInput, OpenAI cached), since providers fill one or both',
-    '  - Cache wr is priced at 1.25x the input rate, Cache rd at 0.1x, when a model omits explicit cache rates',
-    'Use --format json for per-component cost, the rates applied, and both raw cache-read fields.',
+    t('Columns are the raw token fields each provider records. codeburn then normalizes for pricing:'),
+    '  - ' + t('Reason folds into Output (priced output = output + reasoning), except copilot, whose reasoning is already inside its output'),
+    '  - ' + t('Cache rd = max(Anthropic cacheReadInput, OpenAI cached), since providers fill one or both'),
+    '  - ' + t('Cache wr is priced at 1.25x the input rate, Cache rd at 0.1x, when a model omits explicit cache rates'),
+    t('Use --format json for per-component cost, the rates applied, and both raw cache-read fields.'),
   ].join('\n')
   return table + '\n' + legend
 }

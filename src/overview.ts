@@ -3,10 +3,11 @@ import { Chalk, type ChalkInstance } from 'chalk'
 import { homedir } from 'os'
 
 import { CATEGORY_LABELS, type ProjectSummary, type TaskCategory } from './types.js'
+import { t, tn } from './i18n.js'
 import { formatCost as baseCost, getCurrency } from './currency.js'
 import { findUnpricedModels, getShortModelName, unpricedModelHint } from './models.js'
 import { callBillableOutputTokens, sessionBillableOutputTokens, sessionModelBillableOutputTokens } from './session-output.js'
-import { markEstimated } from './format.js'
+import { displayWidth, markEstimated, padCells, periodLabelForDisplay } from './format.js'
 import { dateKey } from './day-aggregator.js'
 import type { DailyEntry } from './daily-cache.js'
 import type { BudgetStatus, BudgetTier } from './budget.js'
@@ -37,7 +38,7 @@ function isAbsoluteProjectPath(path: string): boolean {
 function projectName(p: ProjectSummary): string {
   const path = p.projectPath
   if (path) {
-    if (path === homedir()) return 'Home'
+    if (path === homedir()) return t('Home')
     if (!isAbsoluteProjectPath(path)) return p.project || path
     const base = path.replace(/[/\\]+$/, '').split(/[/\\]/).filter(Boolean).pop()
     if (base) return base
@@ -52,10 +53,12 @@ type OverviewBudget = {
   inProgress: boolean
 }
 
-// Visible width, ignoring ANSI color codes, so padding stays aligned.
+// Visible width, ignoring ANSI color codes, so padding stays aligned. Counted
+// in terminal cells rather than characters so a translated (CJK) header keeps
+// its column square; identical to the character count for ASCII.
 function vlen(s: string): number {
   // eslint-disable-next-line no-control-regex
-  return s.replace(/\[[0-9;]*m/g, '').length
+  return displayWidth(s.replace(/\[[0-9;]*m/g, ''))
 }
 
 function renderTable(c: ChalkInstance, cols: Col[], rows: string[][]): string {
@@ -111,12 +114,15 @@ export function renderOverview(
   const heading = (text: string): string => c.cyan.bold(text)
   const out: string[] = []
   const durable = opts.durable
+  // `opts.label` stays English on the way in (it also feeds the app payload);
+  // the terminal header, empty state and bottom line all read the display copy.
+  const label = periodLabelForDisplay(opts.label)
 
-  out.push(c.bold('CodeBurn') + c.dim('  ' + opts.label))
+  out.push(c.bold('CodeBurn') + c.dim('  ' + label))
   out.push('')
 
   if (projects.length === 0 && !(durable && durable.cost > 0)) {
-    out.push(c.dim(`No usage found for ${opts.label}.`))
+    out.push(c.dim(t('No usage found for %s.', label)))
     return out.join('\n') + '\n'
   }
 
@@ -218,52 +224,59 @@ export function renderOverview(
   const cacheHit = cacheHitDenom > 0 ? (cacheR / cacheHitDenom) * 100 : 0
 
   // Totals
-  out.push(heading('Totals'))
-  const kv = (k: string, v: string): string => '  ' + c.dim(k.padEnd(11)) + v
-  out.push(kv('Cost', c.bold(formatCost(cost))))
-  out.push(kv('Tokens', formatTokens(totalTokens) + c.dim('   (breakdown below)')))
-  out.push(kv('Calls', formatCount(calls) + c.dim('   sessions ') + formatCount(sessions)))
-  out.push(kv('Cache hit', `${cacheHit.toFixed(1)}%`))
-  if (savings > 0) out.push(kv('Savings', formatCost(savings) + c.dim(' (local models)')))
+  out.push(heading(t('Totals')))
+  const kv = (k: string, v: string): string => '  ' + c.dim(padCells(k, 11)) + v
+  out.push(kv(t('Cost'), c.bold(formatCost(cost))))
+  out.push(kv(t('Tokens'), formatTokens(totalTokens) + c.dim('   ' + t('(breakdown below)'))))
+  out.push(kv(t('Calls'), formatCount(calls) + c.dim('   ' + t('sessions') + ' ') + formatCount(sessions)))
+  out.push(kv(t('Cache hit'), `${cacheHit.toFixed(1)}%`))
+  if (savings > 0) out.push(kv(t('Savings'), formatCost(savings) + c.dim(' ' + t('(local models)'))))
   const unpriced = findUnpricedModels(
     [...byModel.entries()].map(([model, d]) => ({ model, calls: d.calls, cost: d.cost, tokens: d.tokens })),
   )
   if (unpriced.length > 0) {
     const shown = unpriced.slice(0, 3)
-      .map((u) => `${u.model} (${formatTokens(u.tokens)} tok)`)
+      .map((u) => t('%s (%s tok)', u.model, formatTokens(u.tokens)))
       .join(', ')
-    const more = unpriced.length > 3 ? ` +${unpriced.length - 3} more` : ''
-    out.push(kv('Unpriced', c.yellow(`${unpriced.length} model${unpriced.length === 1 ? '' : 's'} at $0: `) + shown + more))
+    const more = unpriced.length > 3 ? ' ' + t('+%d more', unpriced.length - 3) : ''
+    out.push(kv(t('Unpriced'), c.yellow(tn('%d model at $0:', '%d models at $0:', unpriced.length) + ' ') + shown + more))
     out.push(kv('', c.dim(unpricedModelHint())))
   }
   if (opts.budget) {
-    const label = opts.budget.tier === 'daily'
-      ? 'Daily'
+    // One whole key per tier: the tier word is an inseparable part of the
+    // sentence, so it must not be spliced in as a translated fragment.
+    const budgetKey = opts.budget.tier === 'daily'
+      ? 'Daily budget: %1$s of %2$s (%3$s)'
       : opts.budget.tier === 'weekly'
-        ? 'Weekly'
-        : 'Monthly'
+        ? 'Weekly budget: %1$s of %2$s (%3$s)'
+        : 'Monthly budget: %1$s of %2$s (%3$s)'
+    const projectedKey = opts.budget.tier === 'monthly'
+      ? 'projected %s by month end'
+      : opts.budget.tier === 'weekly'
+        ? 'projected %s by week end'
+        : 'projected %s by day end'
     const status = opts.budget.status
     const pct = `${Math.floor(status.pct)}%`
     const statusColor = status.state === 'over' ? c.red : status.state === 'warn' ? c.yellow : c.green
     const projected = opts.budget.inProgress
-      ? c.dim(`  projected ${formatDisplayCost(status.projected)} by ${opts.budget.tier === 'monthly' ? 'month' : opts.budget.tier === 'weekly' ? 'week' : 'day'} end`)
+      ? c.dim('  ' + t(projectedKey, formatDisplayCost(status.projected)))
       : ''
-    out.push('  ' + statusColor(`${label} budget: ${formatDisplayCost(status.spent)} of ${formatDisplayCost(status.budget)} (${pct})`) + projected)
+    out.push('  ' + statusColor(t(budgetKey, formatDisplayCost(status.spent), formatDisplayCost(status.budget), pct)) + projected)
   }
   out.push('')
 
   // Tokens breakdown: input / output / cache in (written) / cache out (read)
   if (totalTokens > 0) {
     const share = (n: number): string => `${Math.round((n / totalTokens) * 100)}%`
-    out.push(heading('Tokens'))
+    out.push(heading(t('Tokens')))
     out.push(renderTable(c,
-      [{ header: 'Type' }, { header: 'Tokens', right: true }, { header: 'Share', right: true }],
+      [{ header: t('Type') }, { header: t('Tokens'), right: true }, { header: t('Share'), right: true }],
       [
-        ['Input', formatTokens(inTok), share(inTok)],
-        ['Output', formatTokens(outTok), share(outTok)],
-        ['Cache in', formatTokens(cacheW), share(cacheW)],
-        ['Cache out', formatTokens(cacheR), share(cacheR)],
-        ['Total', formatTokens(totalTokens), '100%'],
+        [t('Input'), formatTokens(inTok), share(inTok)],
+        [t('Output'), formatTokens(outTok), share(outTok)],
+        [t('Cache in'), formatTokens(cacheW), share(cacheW)],
+        [t('Cache out'), formatTokens(cacheR), share(cacheR)],
+        [t('Total'), formatTokens(totalTokens), '100%'],
       ],
     ))
     out.push('')
@@ -274,9 +287,9 @@ export function renderOverview(
     .filter(([, v]) => v.cost > 0 || v.tokens > 0)
     .sort((a, b) => b[1].cost - a[1].cost)
   if (providerRows.length) {
-    out.push(heading('By tool'))
+    out.push(heading(t('By tool')))
     out.push(renderTable(c,
-      [{ header: 'Tool' }, { header: 'Cost', right: true }, { header: 'Tokens', right: true }, { header: 'Share', right: true }],
+      [{ header: t('Tool') }, { header: t('Cost'), right: true }, { header: t('Tokens'), right: true }, { header: t('Share'), right: true }],
       providerRows.map(([name, v]) => [name, formatCost(v.cost), formatTokens(v.tokens), cost > 0 ? `${Math.round((v.cost / cost) * 100)}%` : '0%']),
     ))
     out.push('')
@@ -285,13 +298,13 @@ export function renderOverview(
   // Top models
   const modelRows = [...byModel.entries()].filter(([, v]) => v.cost > 0 || v.tokens > 0).sort((a, b) => b[1].cost - a[1].cost).slice(0, 10)
   if (modelRows.length) {
-    out.push(heading('Top models'))
+    out.push(heading(t('Top models')))
     out.push(renderTable(c,
-      [{ header: 'Model' }, { header: 'Cost', right: true }, { header: 'Calls', right: true }, { header: 'Tokens', right: true }],
+      [{ header: t('Model') }, { header: t('Cost'), right: true }, { header: t('Calls'), right: true }, { header: t('Tokens'), right: true }],
       modelRows.map(([m, v]) => [getShortModelName(m), markEstimated(formatCost(v.cost), v.estimatedCost > 0), formatCount(v.calls), formatTokens(v.tokens)]),
     ))
     if (modelRows.some(([, v]) => v.estimatedCost > 0)) {
-      out.push('  ' + c.dim('~ estimated cost (priced from estimated tokens)'))
+      out.push('  ' + c.dim(t('~ estimated cost (priced from estimated tokens)')))
     }
     out.push('')
   }
@@ -299,9 +312,9 @@ export function renderOverview(
   // Highest-value days
   const topDays = [...byDay.entries()].sort((a, b) => b[1].cost - a[1].cost).slice(0, 5)
   if (topDays.length) {
-    out.push(heading('Highest-value days'))
+    out.push(heading(t('Highest-value days')))
     out.push(renderTable(c,
-      [{ header: '#' }, { header: 'Date' }, { header: 'Cost', right: true }, { header: 'Tokens', right: true }],
+      [{ header: '#' }, { header: t('Date') }, { header: t('Cost'), right: true }, { header: t('Tokens'), right: true }],
       topDays.map(([d, v], i) => [String(i + 1), d, formatCost(v.cost), formatTokens(v.tokens)]),
     ))
     out.push('')
@@ -310,9 +323,9 @@ export function renderOverview(
   // Top projects
   const projRows = [...byProject.entries()].sort((a, b) => b[1].cost - a[1].cost).slice(0, 10)
   if (projRows.length) {
-    out.push(heading('Top projects'))
+    out.push(heading(t('Top projects')))
     out.push(renderTable(c,
-      [{ header: 'Project' }, { header: 'Cost', right: true }, { header: 'Sessions', right: true }],
+      [{ header: t('Project') }, { header: t('Cost'), right: true }, { header: t('Sessions'), right: true }],
       projRows.map(([name, v]) => [name, formatCost(v.cost), formatCount(v.sessions)]),
     ))
     out.push('')
@@ -321,9 +334,9 @@ export function renderOverview(
   // Daily
   const dailyRows = [...byDay.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
   if (dailyRows.length) {
-    out.push(heading('Daily'))
+    out.push(heading(t('Daily')))
     out.push(renderTable(c,
-      [{ header: 'Date' }, { header: 'Cost', right: true }, { header: 'Tokens', right: true }, { header: 'Providers' }],
+      [{ header: t('Date') }, { header: t('Cost'), right: true }, { header: t('Tokens'), right: true }, { header: t('Providers') }],
       dailyRows.map(([d, v]) => [d, formatCost(v.cost), formatTokens(v.tokens), [...v.providers].sort().join(', ')]),
     ))
     out.push('')
@@ -332,10 +345,10 @@ export function renderOverview(
   // By activity
   const catRows = [...byCat.entries()].filter(([, v]) => v.cost > 0 || v.turns > 0).sort((a, b) => b[1].cost - a[1].cost)
   if (catRows.length) {
-    out.push(heading('By activity'))
+    out.push(heading(t('By activity')))
     out.push(renderTable(c,
-      [{ header: 'Activity' }, { header: 'Cost', right: true }, { header: 'Turns', right: true }],
-      catRows.map(([cat, v]) => [CATEGORY_LABELS[cat as TaskCategory] ?? cat, formatCost(v.cost), formatCount(v.turns)]),
+      [{ header: t('Activity') }, { header: t('Cost'), right: true }, { header: t('Turns'), right: true }],
+      catRows.map(([cat, v]) => [t(CATEGORY_LABELS[cat as TaskCategory] ?? cat), formatCost(v.cost), formatCount(v.turns)]),
     ))
     out.push('')
   }
@@ -343,9 +356,9 @@ export function renderOverview(
   // Tools
   const toolRows = [...byTool.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12)
   if (toolRows.length) {
-    out.push(heading('Tools'))
+    out.push(heading(t('Tools')))
     out.push(renderTable(c,
-      [{ header: 'Tool' }, { header: 'Calls', right: true }],
+      [{ header: t('Tool') }, { header: t('Calls'), right: true }],
       toolRows.map(([t, n]) => [t, formatCount(n)]),
     ))
     out.push('')
@@ -353,21 +366,24 @@ export function renderOverview(
 
   const topTool = providerRows[0]?.[0]
   const topModel = modelRows[0] ? getShortModelName(modelRows[0][0]) : ''
-  const mostly = topTool ? `, mostly ${topTool}${topModel ? ` / ${topModel}` : ''}` : ''
-  out.push(c.dim('Bottom line: ') + `${opts.label} totals ${formatCost(cost)} across ${formatTokens(totalTokens)} tokens${mostly}.`)
+  const mostly = topTool ? (topModel ? `${topTool} / ${topModel}` : topTool) : ''
+  const summary = mostly
+    ? t('%1$s totals %2$s across %3$s tokens, mostly %4$s.', label, formatCost(cost), formatTokens(totalTokens), mostly)
+    : t('%1$s totals %2$s across %3$s tokens.', label, formatCost(cost), formatTokens(totalTokens))
+  out.push(c.dim(t('Bottom line:') + ' ') + summary)
 
   // When some of the period's total came from days whose session logs have since
   // expired, say so once. The figure is real (preserved in the durable daily
   // cache); it just can't be re-derived from surviving files anymore.
   if (durable && durable.carriedCostUSD > 0) {
-    out.push(c.dim(`  includes ${formatCost(durable.carriedCostUSD)} preserved from expired session logs`))
+    out.push(c.dim('  ' + t('includes %s preserved from expired session logs', formatCost(durable.carriedCostUSD))))
   }
 
   // A project filter cannot claim days the cache holds without a project split
   // (recorded before that split existed), so they sit outside this total. Say how
   // much rather than let the filtered figure look inexplicably short.
   if (durable && (durable.unattributedCostUSD ?? 0) > 0) {
-    out.push(c.dim(`  excludes ${formatCost(durable.unattributedCostUSD!)} from days with no per-project history`))
+    out.push(c.dim('  ' + t('excludes %s from days with no per-project history', formatCost(durable.unattributedCostUSD!))))
   }
 
   return out.join('\n') + '\n'

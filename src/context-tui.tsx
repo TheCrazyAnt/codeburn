@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react'
 import { render, Box, Text, useApp, useInput } from 'ink'
 
-import { formatTokens } from './format.js'
+import { displayWidth, formatTokens, padCells, truncateToWidth } from './format.js'
+import { t, tn } from './i18n.js'
 import { patchStdoutForWindows } from './ink-win.js'
 import {
   buildContextTree,
@@ -24,8 +25,10 @@ const PROVIDERS: Array<{ key: Provider; label: string }> = [
   { key: 'codex', label: 'Codex' },
 ]
 
+// Terminal cells, not characters: a CJK label is twice as wide per character,
+// so measuring by cell keeps these fixed-width columns square.
 function truncate(text: string, max: number): string {
-  return text.length > max ? `${text.slice(0, max - 1)}…` : text
+  return displayWidth(text) > max ? truncateToWidth(text, max, '…') : text
 }
 
 /// The primary label for a session row: its AI-generated title when present,
@@ -33,7 +36,7 @@ function truncate(text: string, max: number): string {
 /// cluster, so a titled session reads by what it was about, not its hash.
 export function sessionPrimaryLabel(title: string | undefined): string {
   const trimmed = (title ?? '').trim()
-  return trimmed || 'untitled session'
+  return trimmed || t('untitled session')
 }
 
 async function loadSessions(provider: Provider): Promise<TitledSessionRef[]> {
@@ -43,16 +46,22 @@ async function loadSessions(provider: Provider): Promise<TitledSessionRef[]> {
 function TreeDetails({ tree, scope }: { tree: ContextTreeResult; scope: Scope }) {
   const view = scope === 'full' ? tree.full : tree.effective
   const rows = snapshotRows(view)
-  const labelWidth = Math.max(...rows.map((r) => r.depth * 2 + r.label.length)) + 2
+  const labelWidth = Math.max(...rows.map((r) => r.depth * 2 + displayWidth(r.label))) + 2
   const countWidth = Math.max(...rows.map((r) => `${r.count}x`.length)) + 1
   const tokenWidth = Math.max(...rows.map((r) => formatTokens(r.tokens).length)) + 2
 
-  const headline: string[] = [`model ${tree.model}`, `messages ${view.messages.toLocaleString('en-US')}`, `est ${formatTokens(view.tokens)}`]
+  const headline: string[] = [
+    t('model %s', tree.model),
+    t('messages %s', view.messages.toLocaleString('en-US')),
+    t('est %s', formatTokens(view.tokens)),
+  ]
   if (tree.reported) {
     const { context, window } = tree.reported
-    headline.push(window ? `context ${formatTokens(context)} / ${formatTokens(window)} (${Math.round((context / window) * 100)}%)` : `context ${formatTokens(context)} (exact)`)
+    headline.push(window
+      ? t('context %1$s / %2$s (%3$d%%)', formatTokens(context), formatTokens(window), Math.round((context / window) * 100))
+      : t('context %s (exact)', formatTokens(context)))
   }
-  if (tree.compactions > 0) headline.push(`${tree.compactions} compaction${tree.compactions === 1 ? '' : 's'}`)
+  if (tree.compactions > 0) headline.push(tn('%d compaction', '%d compactions', tree.compactions))
 
   return (
     <Box flexDirection="column" marginLeft={4} marginBottom={1} paddingLeft={1} borderStyle="round" borderColor={DIM} width={72}>
@@ -60,14 +69,14 @@ function TreeDetails({ tree, scope }: { tree: ContextTreeResult; scope: Scope })
         {headline.join(' · ')}
       </Text>
       <Text color={DIM}>
-        showing <Text color={ORANGE}>{scope === 'effective' ? 'live window' : 'full history'}</Text> · press f to switch
+        {t('showing') + ' '}<Text color={ORANGE}>{scope === 'effective' ? t('live window') : t('full history')}</Text>{' · ' + t('press f to switch')}
       </Text>
       <Box height={1} />
       {rows.map((r, i) => (
         <Text key={i}>
           {' '.repeat(r.depth * 2)}
           <Text bold={r.bold} color={r.bold ? undefined : DIM}>
-            {(r.label + ' ').padEnd(labelWidth - r.depth * 2, r.bold ? ' ' : '·')}
+            {padCells(r.label + ' ', labelWidth - r.depth * 2, r.bold ? ' ' : '·')}
           </Text>
           <Text color={DIM}>{`${r.count.toLocaleString('en-US')}x`.padStart(countWidth)}</Text>
           <Text color={ORANGE} bold={r.bold}>
@@ -145,7 +154,7 @@ function ContextTuiApp({ initialScope }: { initialScope: Scope }) {
     <Box flexDirection="column" paddingX={1} paddingY={1}>
       <Box>
         <Text bold color={ORANGE}>
-          Context{' '}
+          {t('Context')}{' '}
         </Text>
         {PROVIDERS.map((p) => (
           <Text key={p.key}>
@@ -155,12 +164,12 @@ function ContextTuiApp({ initialScope }: { initialScope: Scope }) {
             </Text>
           </Text>
         ))}
-        <Text color={DIM}>{'   ↑↓ move · enter expand · tab provider · f scope · q quit'}</Text>
+        <Text color={DIM}>{'   ' + t('↑↓ move · enter expand · tab provider · f scope · q quit')}</Text>
       </Box>
       <Box height={1} />
 
-      {!sessions && <Text color={DIM}>Loading sessions…</Text>}
-      {sessions && sessions.length === 0 && <Text color={DIM}>No sessions found for this provider.</Text>}
+      {!sessions && <Text color={DIM}>{t('Loading sessions…')}</Text>}
+      {sessions && sessions.length === 0 && <Text color={DIM}>{t('No sessions found for this provider.')}</Text>}
 
       {sessions?.map((s, i) => {
         const selected = i === cursor
@@ -173,22 +182,22 @@ function ContextTuiApp({ initialScope }: { initialScope: Scope }) {
             <Text>
               <Text color={ORANGE}>{selected ? '❯ ' : '  '}</Text>
               <Text bold={selected} color={selected ? ORANGE : undefined}>
-                {truncate(sessionPrimaryLabel(s.title), titleWidth).padEnd(titleWidth)}
+                {padCells(truncate(sessionPrimaryLabel(s.title), titleWidth), titleWidth)}
               </Text>
               <Text color={DIM}>
                 {'  '}
-                {s.sessionId.slice(0, 8)}  {truncate(s.project, 12).padEnd(12)} {relativeAge(s.mtimeMs).padStart(8)} {`${(s.sizeBytes / 1024 / 1024).toFixed(1)}MB`.padStart(8)}
+                {s.sessionId.slice(0, 8)}  {padCells(truncate(s.project, 12), 12)} {relativeAge(s.mtimeMs).padStart(8)} {`${(s.sizeBytes / 1024 / 1024).toFixed(1)}MB`.padStart(8)}
               </Text>
             </Text>
             {expanded && error && (
               <Box marginLeft={4} marginBottom={1}>
-                <Text color="red">could not read this session: {error}</Text>
+                <Text color="red">{t('could not read this session: %s', error)}</Text>
               </Box>
             )}
             {expanded && !tree && !error && (
               <Box marginLeft={4} marginBottom={1}>
                 <Text color={ORANGE}>{SPINNER[frame % SPINNER.length]} </Text>
-                <Text color={DIM}>reading transcript ({(s.sizeBytes / 1024 / 1024).toFixed(0)}MB)…</Text>
+                <Text color={DIM}>{t('reading transcript (%sMB)…', (s.sizeBytes / 1024 / 1024).toFixed(0))}</Text>
               </Box>
             )}
             {expanded && tree && <TreeDetails tree={tree} scope={scope} />}
@@ -197,7 +206,7 @@ function ContextTuiApp({ initialScope }: { initialScope: Scope }) {
       })}
 
       <Box height={1} />
-      <Text color={DIM}>block tokens are estimates; context (exact) comes from API usage</Text>
+      <Text color={DIM}>{t('block tokens are estimates; context (exact) comes from API usage')}</Text>
     </Box>
   )
 }

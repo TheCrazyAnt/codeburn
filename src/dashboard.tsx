@@ -4,7 +4,8 @@ import { EventEmitter } from 'node:events'
 import React, { Fragment, useState, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { render, Box, Text, measureElement, useInput, useApp, useWindowSize, type DOMElement, type Instance, type RenderOptions } from 'ink'
 import { CATEGORY_LABELS, type DateRange, type ProjectSummary, type TaskCategory } from './types.js'
-import { formatCost, formatTokens, markEstimated, carriedCostNote } from './format.js'
+import { t } from './i18n.js'
+import { displayWidth, formatCost, formatTokens, markEstimated, padCells, truncateToWidth, carriedCostNote } from './format.js'
 import { aggregateModelEfficiency } from './model-efficiency.js'
 import { parseAllSessions, filterProjectsByDateRange, filterProjectsByName, setInteractiveScanUI, withSinglePassParse, withColdFirstPaintFloor, filesParsedFromSourceCount, isCompleteSessionSnapshotAvailable } from './parser.js'
 import { findUnpricedModels, isExpectedFreeModel, loadPricing } from './models.js'
@@ -22,7 +23,7 @@ import { behavioralCallCount } from './behavioral-weight.js'
 import { CompareView } from './compare.js'
 import { getPlanUsages, type PlanUsage } from './plan-usage.js'
 import { planDisplayName } from './plans.js'
-import { formatDayRangeLabel, getDateRange, parseDayFlag, PERIODS, PERIOD_LABELS, shiftDay, type Period } from './cli-date.js'
+import { getDateRange, parseDayFlag, PERIODS, PERIOD_LABELS, shiftDay, type Period } from './cli-date.js'
 import { BSU, patchStdoutForWindows } from './ink-win.js'
 
 type View = 'dashboard' | 'optimize' | 'compare'
@@ -253,7 +254,7 @@ export function scrollHistoryCursor(cursor: number, direction: -1 | 1, pageSize:
 // population so the two counts read as different questions, not a
 // contradiction.
 export function dailyActivityFooter(cursor: number, days: number, rowCount: number): string {
-  return `Showing ${cursor + 1}–${Math.min(cursor + days, rowCount)} of ${rowCount} days scanned · newest first`
+  return t('Showing %1$d–%2$d of %3$d days scanned · newest first', cursor + 1, Math.min(cursor + days, rowCount), rowCount)
 }
 
 // Scrollable mode keeps the dashboard up when only the selected period is
@@ -405,6 +406,13 @@ function getDayRange(day: string): DateRange {
   return parseDayFlag(day)!.range
 }
 
+/// Display-side twin of cli-date's `formatDayRangeLabel`. That one stays English
+/// because its label travels in the app payload, where the macOS side does its
+/// own lookup; only what the terminal prints is translated here.
+function dayHeaderLabel(day: string): string {
+  return t('Day (%s)', day)
+}
+
 export function getDashboardScanRange(period: Period, customRange: DateRange | null | undefined, day: string | null, scrollableHistory = true): DateRange {
   if (day) return getDayRange(day)
   if (customRange) return customRange
@@ -469,14 +477,16 @@ function Panel({ title, color, children, width }: { title: string; color: string
   )
 }
 
+/// Truncates to `n` terminal cells, never splitting a wide character, then pads
+/// the remainder out to `n`. Identical to the old slice/padEnd pair for ASCII.
 function fit(s: string, n: number): string {
-  return s.length > n ? s.slice(0, n) : s.padEnd(n)
+  return padCells(truncateToWidth(s, n), n)
 }
 
 type MetricCell = { text: string; color?: string; dimColor?: boolean }
 
 function getMetricWidths(headers: string[], rows: string[][]): number[] {
-  return headers.map((header, index) => Math.max(header.length, ...rows.map(row => row[index]?.length ?? 0)))
+  return headers.map((header, index) => Math.max(displayWidth(header), ...rows.map(row => displayWidth(row[index] ?? ''))))
 }
 
 function getMetricGroupWidth(metricWidths: number[]): number {
@@ -560,11 +570,17 @@ export function planBudgetHeadline(planUsage: PlanUsage): string {
       // Whole credits only: the bulk of this number is priced from tokens,
       // so decimals would claim accuracy it lacks.
       const shown = formatCredits(Math.round(estimated))
-      return `${planLabel(planUsage)}: ~${shown} / ${formatCredits(budget)} AI Credits (estimated; ${rated} of ${rated + unrated} requests carry GitHub's exact figure)`
+      return t(
+        "%1$s: ~%2$s / %3$s AI Credits (estimated; %4$d of %5$d requests carry GitHub's exact figure)",
+        planLabel(planUsage), shown, formatCredits(budget), rated, rated + unrated,
+      )
     }
-    return `${planLabel(planUsage)}: ${formatCredits(spent)} / ${formatCredits(budget)} AI Credits`
+    return t('%1$s: %2$s / %3$s AI Credits', planLabel(planUsage), formatCredits(spent), formatCredits(budget))
   }
-  return `${planLabel(planUsage)}: ${formatCost(planUsage.spentApiEquivalentUsd)} API-equivalent / ${formatCost(planUsage.budgetUsd)} budget`
+  return t(
+    '%1$s: %2$s API-equivalent / %3$s budget',
+    planLabel(planUsage), formatCost(planUsage.spentApiEquivalentUsd), formatCost(planUsage.budgetUsd),
+  )
 }
 
 function formatCredits(n: number): string {
@@ -577,14 +593,20 @@ export function planStatusText(planUsage: PlanUsage): string {
   // The period is anniversary-based (plan.resetDay, 1-28, settable per plan via
   // `codeburn plan set --reset-day`), so this is a monthly budget window, not a
   // calendar month. The headline already says "budget"; do not repeat it here.
-  const detail = `Not a live provider window. Projected: ${formatCost(planUsage.projectedMonthUsd)}. Next budget reset in ${planUsage.daysUntilReset} days.`
+  const detail = t(
+    'Not a live provider window. Projected: %1$s. Next budget reset in %2$d days.',
+    formatCost(planUsage.projectedMonthUsd), planUsage.daysUntilReset,
+  )
   if (planUsage.status === 'under') {
-    return `Well within budget. ${detail}`
+    return t('Well within budget. %s', detail)
   }
   if (planUsage.status === 'near') {
-    return `Approaching budget. ${detail}`
+    return t('Approaching budget. %s', detail)
   }
-  return `${(planUsage.spentApiEquivalentUsd / Math.max(planUsage.budgetUsd, 1)).toFixed(1)}x the sticker price. ${detail}`
+  return t(
+    '%1$sx the sticker price. %2$s',
+    (planUsage.spentApiEquivalentUsd / Math.max(planUsage.budgetUsd, 1)).toFixed(1), detail,
+  )
 }
 
 function Overview({ projects, label, width, planUsages, durable }: { projects: ProjectSummary[]; label: string; width: number; planUsages?: PlanUsage[]; durable?: DurableOverview }) {
@@ -613,21 +635,21 @@ function Overview({ projects, label, width, planUsages, durable }: { projects: P
       </Text>
       <Text wrap="truncate-end">
         <Text bold color={GOLD}>{formatCost(totalCost)}</Text>
-        <Text dimColor> cost   </Text>
+        <Text dimColor>{` ${t('cost')}   `}</Text>
         <Text bold>{totalCalls.toLocaleString()}</Text>
-        <Text dimColor> calls   </Text>
+        <Text dimColor>{` ${t('calls')}   `}</Text>
         <Text bold>{String(totalSessions)}</Text>
-        <Text dimColor> sessions   </Text>
+        <Text dimColor>{` ${t('sessions')}   `}</Text>
         <Text bold>{cacheHit.toFixed(1)}%</Text>
-        <Text dimColor> cache hit</Text>
+        <Text dimColor>{` ${t('cache hit')}`}</Text>
       </Text>
       <Text dimColor wrap="truncate-end">
-        {formatTokens(totalInput)} in   {formatTokens(totalOutput)} out   {formatTokens(totalCacheRead)} cached   {formatTokens(totalCacheWrite)} written
+        {t('%1$s in   %2$s out   %3$s cached   %4$s written', formatTokens(totalInput), formatTokens(totalOutput), formatTokens(totalCacheRead), formatTokens(totalCacheWrite))}
       </Text>
       {totalSavings > 0 && (
         <Text wrap="truncate-end">
           <Text color="green">{formatCost(totalSavings)}</Text>
-          <Text dimColor> saved by local models</Text>
+          <Text dimColor>{` ${t('saved by local models')}`}</Text>
         </Text>
       )}
       {durable && carriedCostNote(durable.carriedCostUSD) && (
@@ -681,14 +703,14 @@ function DailyActivity({ projects, days = 14, pw, bw, scrollable = false, cursor
   const orderedRows = scrollable ? [...allRows].reverse() : allRows
   const rows = scrollable ? orderedRows.slice(cursor, cursor + days) : orderedRows.slice(-days)
   const maxCost = Math.max(0, ...(scrollable ? orderedRows : rows).map(row => row.cost))
-  const headers = ['cost', 'calls']
+  const headers = [t('cost'), t('calls')]
   const values = rows.map(row => [formatCost(row.cost), String(row.calls)])
   const metricWidths = getMetricWidths(headers, values)
 
   return (
-    <Panel title="Daily Activity" color={PANEL_COLORS.daily} width={pw}>
+    <Panel title={t('Daily Activity')} color={PANEL_COLORS.daily} width={pw}>
       {loading
-        ? <Text dimColor>Loading daily history...</Text>
+        ? <Text dimColor>{t('Loading daily history...')}</Text>
         : <>
             <DataRow panelWidth={pw} barWidth={bw} label="" dimColor metrics={headers.map(text => ({ text, dimColor: true }))} metricWidths={metricWidths} />
             {rows.map((row, index) => (
@@ -753,14 +775,14 @@ export function shortProject(absPath: string, width = Infinity): string {
 
 export function getDashboardMaxWidth(projects: ProjectSummary[], budgets?: Map<string, ContextBudget>, activeProvider?: string): number {
   const sessions = projects.flatMap(project => project.sessions)
-  const longest = (values: string[]) => Math.max(1, ...values.map(value => value.length))
+  const longest = (values: string[]) => Math.max(1, ...values.map(value => displayWidth(value)))
   const rowWidth = (labels: string[], metricCount: number, metricWidth = 7) =>
     PANEL_CHROME + 10 + 1 + longest(labels) + metricCount * metricWidth
   const modelTotals = aggregateModelTotals(projects)
   const modelMetricWidth = Math.max(7, ...Object.values(modelTotals).map(model =>
     markEstimated(formatCost(model.costUSD), model.estimatedCostUSD > 0).length
   ))
-  const categoryLabels = sessions.flatMap(session => Object.keys(session.categoryBreakdown).map(category => CATEGORY_LABELS[category as TaskCategory] ?? category))
+  const categoryLabels = sessions.flatMap(session => Object.keys(session.categoryBreakdown).map(category => t(CATEGORY_LABELS[category as TaskCategory] ?? category)))
   const skillLabels = sessions.flatMap(session => Object.keys(session.skillBreakdown))
   const agentLabels = sessions.flatMap(session => Object.keys(session.subagentBreakdown))
   const widestPanel = Math.max(
@@ -783,7 +805,7 @@ function getProjectBreakdownRowLimit(period: Period, dayMode = false): number {
 function ProjectBreakdown({ projects, pw, bw, budgets, rows = 14 }: { projects: ProjectSummary[]; pw: number; bw: number; budgets?: Map<string, ContextBudget>; rows?: number }) {
   const maxCost = Math.max(...projects.map(p => p.totalCostUSD))
   const hasBudgets = budgets && budgets.size > 0
-  const headers = ['cost', 'avg/s', 'session', ...(hasBudgets ? ['overhead'] : [])]
+  const headers = [t('cost'), t('avg/s'), t('session'), ...(hasBudgets ? [t('overhead')] : [])]
   const visibleProjects = projects.slice(0, rows)
   const values = visibleProjects.map(project => {
     const budget = budgets?.get(project.project)
@@ -799,7 +821,7 @@ function ProjectBreakdown({ projects, pw, bw, budgets, rows = 14 }: { projects: 
   const projectBarWidth = Math.max(1, Math.min(bw, pw - PANEL_CHROME - getMetricGroupWidth(metricWidths) - 2 - desiredLabelWidth))
   const { labelWidth } = getDataRowLayout(pw, projectBarWidth, metricWidths)
   return (
-    <Panel title="By Project" color={PANEL_COLORS.project} width={pw}>
+    <Panel title={t('By Project')} color={PANEL_COLORS.project} width={pw}>
       <DataRow panelWidth={pw} barWidth={projectBarWidth} label="" metrics={headers.map(text => ({ text, dimColor: true }))} metricWidths={metricWidths} />
       {visibleProjects.map((project, i) => {
         const row = values[i]!
@@ -840,7 +862,7 @@ function ModelBreakdown({ projects, pw, bw }: { projects: ProjectSummary[]; pw: 
   // 'cache'/'1-shot' and drops the value column entirely), so the header stays
   // "Tok/s" -- the legend below carries the "Effective Tok/s" framing and the
   // caveat that it is not a vendor decode-speed figure.
-  const headers = ['cost', 'cache', 'calls', '1-shot', 'Tok/s']
+  const headers = [t('cost'), t('cache'), t('calls'), t('1-shot'), 'Tok/s']
   const values = sorted.map(([model, data], index) => {
     const totalInput = data.freshInput + data.cacheRead + data.cacheWrite
     const efficiency = modelEfficiency.get(model)
@@ -868,7 +890,7 @@ function ModelBreakdown({ projects, pw, bw }: { projects: ProjectSummary[]; pw: 
   })))
 
   return (
-    <Panel title="By Model" color={PANEL_COLORS.model} width={pw}>
+    <Panel title={t('By Model')} color={PANEL_COLORS.model} width={pw}>
       <DataRow panelWidth={pw} barWidth={modelBarWidth} label="" metrics={headers.map(text => ({ text, dimColor: true }))} metricWidths={metricWidths} />
       {sorted.map(([model, data], i) => {
         const row = values[i]!
@@ -893,14 +915,14 @@ function ModelBreakdown({ projects, pw, bw }: { projects: ProjectSummary[]; pw: 
       {unpriced.length > 0 && (
         <Text color="yellow" wrap={pw <= 44 ? 'wrap' : 'truncate-end'}>
           {pw <= 44
-            ? `! ${unpriced.length}: codeburn models --unpriced`
-            : `! ${unpriced.length} unpriced: codeburn models --unpriced`}
+            ? t('! %d: codeburn models --unpriced', unpriced.length)
+            : t('! %d unpriced: codeburn models --unpriced', unpriced.length)}
         </Text>
       )}
       {anyEstimated && (
-        <Text dimColor wrap="truncate-end">~ estimated cost (priced from estimated tokens)</Text>
+        <Text dimColor wrap="truncate-end">{t('~ estimated cost (priced from estimated tokens)')}</Text>
       )}
-      <Text dimColor wrap="truncate-end">~ Effective Tok/s: generated tokens ÷ time the agent spent waiting on the model, tool execution excluded. Includes prefill, request assembly and reasoning. Not comparable to vendor decode-speed figures.</Text>
+      <Text dimColor wrap="truncate-end">{t('~ Effective Tok/s: generated tokens ÷ time the agent spent waiting on the model, tool execution excluded. Includes prefill, request assembly and reasoning. Not comparable to vendor decode-speed figures.')}</Text>
     </Panel>
   )
 }
@@ -941,14 +963,14 @@ function getActivityBreakdownRowCount(projects: ProjectSummary[]): number {
 function ActivityBreakdown({ projects, pw, bw }: { projects: ProjectSummary[]; pw: number; bw: number }) {
   const { sorted, sortedSkills } = aggregateActivityBreakdown(projects)
   const maxCost = sorted[0]?.[1]?.costUSD ?? 0
-  const headers = ['cost', 'turns', '1-shot']
+  const headers = [t('cost'), t('turns'), t('1-shot')]
   const values = [
     ...sorted.map(([, data]) => [formatCost(data.costUSD), String(data.turns), data.editTurns > 0 ? `${Math.round((data.oneShotTurns / data.editTurns) * 100)}%` : '-']),
     ...sortedSkills.map(([, data]) => [formatCost(data.costUSD), String(data.turns), data.editTurns > 0 ? `${Math.round((data.oneShotTurns / data.editTurns) * 100)}%` : '-']),
   ]
   const metricWidths = getMetricWidths(headers, values)
   return (
-    <Panel title="By Activity" color={PANEL_COLORS.activity} width={pw}>
+    <Panel title={t('By Activity')} color={PANEL_COLORS.activity} width={pw}>
       <DataRow panelWidth={pw} barWidth={bw} label="" metrics={headers.map(text => ({ text, dimColor: true }))} metricWidths={metricWidths} />
       {sorted.flatMap(([cat, data]) => {
         const oneShotPct = data.editTurns > 0 ? Math.round((data.oneShotTurns / data.editTurns) * 100) + '%' : '-'
@@ -957,7 +979,7 @@ function ActivityBreakdown({ projects, pw, bw }: { projects: ProjectSummary[]; p
             key={cat}
             panelWidth={pw}
             barWidth={bw}
-            label={CATEGORY_LABELS[cat as TaskCategory] ?? cat}
+            label={t(CATEGORY_LABELS[cat as TaskCategory] ?? cat)}
             labelColor={CATEGORY_COLORS[cat as TaskCategory] ?? '#666666'}
             bar={{ value: data.costUSD, max: maxCost }}
             metrics={[
@@ -1003,10 +1025,10 @@ function ToolBreakdown({ projects, pw, bw, title, filterPrefix }: { projects: Pr
   }
   const sorted = Object.entries(toolTotals).sort(([, a], [, b]) => b - a)
   const maxCalls = sorted[0]?.[1] ?? 0
-  const metricWidths = getMetricWidths(['calls'], sorted.map(([, calls]) => [String(calls)]))
+  const metricWidths = getMetricWidths([t('calls')], sorted.map(([, calls]) => [String(calls)]))
   return (
-    <Panel title={title ?? 'Core Tools'} color={PANEL_COLORS.tools} width={pw}>
-      <DataRow panelWidth={pw} barWidth={bw} label="" metrics={[{ text: 'calls', dimColor: true }]} metricWidths={metricWidths} />
+    <Panel title={title ?? t('Core Tools')} color={PANEL_COLORS.tools} width={pw}>
+      <DataRow panelWidth={pw} barWidth={bw} label="" metrics={[{ text: t('calls'), dimColor: true }]} metricWidths={metricWidths} />
       {sorted.slice(0, 10).map(([tool, calls]) => {
         const raw = filterPrefix ? tool.slice(filterPrefix.length) : tool
         const display = filterPrefix ? (LANG_DISPLAY_NAMES[raw] ?? raw) : raw
@@ -1023,12 +1045,12 @@ function McpBreakdown({ projects, pw, bw }: { projects: ProjectSummary[]; pw: nu
   const mcpTotals: Record<string, number> = {}
   for (const project of projects) { for (const session of project.sessions) { for (const [server, data] of Object.entries(session.mcpBreakdown)) { mcpTotals[server] = (mcpTotals[server] ?? 0) + data.calls } } }
   const sorted = Object.entries(mcpTotals).sort(([, a], [, b]) => b - a)
-  if (sorted.length === 0) return <Panel title="MCP Servers" color={PANEL_COLORS.mcp} width={pw}><Text dimColor>No MCP usage</Text></Panel>
+  if (sorted.length === 0) return <Panel title={t('MCP Servers')} color={PANEL_COLORS.mcp} width={pw}><Text dimColor>{t('No MCP usage')}</Text></Panel>
   const maxCalls = sorted[0]?.[1] ?? 0
-  const metricWidths = getMetricWidths(['calls'], sorted.map(([, calls]) => [String(calls)]))
+  const metricWidths = getMetricWidths([t('calls')], sorted.map(([, calls]) => [String(calls)]))
   return (
-    <Panel title="MCP Servers" color={PANEL_COLORS.mcp} width={pw}>
-      <DataRow panelWidth={pw} barWidth={bw} label="" metrics={[{ text: 'calls', dimColor: true }]} metricWidths={metricWidths} />
+    <Panel title={t('MCP Servers')} color={PANEL_COLORS.mcp} width={pw}>
+      <DataRow panelWidth={pw} barWidth={bw} label="" metrics={[{ text: t('calls'), dimColor: true }]} metricWidths={metricWidths} />
       {sorted.slice(0, 8).map(([server, calls]) => (
         <DataRow key={server} panelWidth={pw} barWidth={bw} label={server} bar={{ value: calls, max: maxCalls }} metrics={[{ text: String(calls) }]} metricWidths={metricWidths} />
       ))}
@@ -1040,12 +1062,12 @@ function BashBreakdown({ projects, pw, bw }: { projects: ProjectSummary[]; pw: n
   const bashTotals: Record<string, number> = {}
   for (const project of projects) { for (const session of project.sessions) { for (const [cmd, data] of Object.entries(session.bashBreakdown)) { bashTotals[cmd] = (bashTotals[cmd] ?? 0) + data.calls } } }
   const sorted = Object.entries(bashTotals).sort(([, a], [, b]) => b - a)
-  if (sorted.length === 0) return <Panel title="Shell Commands" color={PANEL_COLORS.bash} width={pw}><Text dimColor>No shell commands</Text></Panel>
+  if (sorted.length === 0) return <Panel title={t('Shell Commands')} color={PANEL_COLORS.bash} width={pw}><Text dimColor>{t('No shell commands')}</Text></Panel>
   const maxCalls = sorted[0]?.[1] ?? 0
-  const metricWidths = getMetricWidths(['calls'], sorted.map(([, calls]) => [String(calls)]))
+  const metricWidths = getMetricWidths([t('calls')], sorted.map(([, calls]) => [String(calls)]))
   return (
-    <Panel title="Shell Commands" color={PANEL_COLORS.bash} width={pw}>
-      <DataRow panelWidth={pw} barWidth={bw} label="" metrics={[{ text: 'calls', dimColor: true }]} metricWidths={metricWidths} />
+    <Panel title={t('Shell Commands')} color={PANEL_COLORS.bash} width={pw}>
+      <DataRow panelWidth={pw} barWidth={bw} label="" metrics={[{ text: t('calls'), dimColor: true }]} metricWidths={metricWidths} />
       {sorted.slice(0, 10).map(([cmd, calls]) => (
         <DataRow key={cmd} panelWidth={pw} barWidth={bw} label={cmd} bar={{ value: calls, max: maxCalls }} metrics={[{ text: String(calls) }]} metricWidths={metricWidths} />
       ))}
@@ -1060,12 +1082,12 @@ function SkillsAndAgents({ projects, pw, bw }: { projects: ProjectSummary[]; pw:
     for (const [agent, d] of Object.entries(session.subagentBreakdown)) { const e = merged[agent] ?? { uses: 0, cost: 0 }; e.uses += d.calls; e.cost += d.costUSD; merged[agent] = e }
   } }
   const sorted = Object.entries(merged).sort(([, a], [, b]) => b.cost - a.cost)
-  if (sorted.length === 0) return <Panel title="Skills & Agents" color={PANEL_COLORS.skills} width={pw}><Text dimColor>No skill/agent usage</Text></Panel>
+  if (sorted.length === 0) return <Panel title={t('Skills & Agents')} color={PANEL_COLORS.skills} width={pw}><Text dimColor>{t('No skill/agent usage')}</Text></Panel>
   const maxCost = sorted[0]?.[1]?.cost ?? 0
-  const headers = ['uses', 'cost']
+  const headers = [t('uses'), t('cost')]
   const metricWidths = getMetricWidths(headers, sorted.map(([, data]) => [String(data.uses), formatCost(data.cost)]))
   return (
-    <Panel title="Skills & Agents" color={PANEL_COLORS.skills} width={pw}>
+    <Panel title={t('Skills & Agents')} color={PANEL_COLORS.skills} width={pw}>
       <DataRow panelWidth={pw} barWidth={bw} label="" metrics={headers.map(text => ({ text, dimColor: true }))} metricWidths={metricWidths} />
       {sorted.slice(0, 10).map(([name, d]) => (
         <DataRow key={name} panelWidth={pw} barWidth={bw} label={name} bar={{ value: d.cost, max: maxCost }} metrics={[{ text: String(d.uses) }, { text: formatCost(d.cost), color: GOLD }]} metricWidths={metricWidths} />
@@ -1087,10 +1109,10 @@ function ClaudeAgentTypes({ projects, pw, bw }: { projects: ProjectSummary[]; pw
   const sorted = Object.entries(merged).sort(([, a], [, b]) => b.cost - a.cost)
   if (sorted.length === 0) return null
   const maxCost = sorted[0]?.[1]?.cost ?? 0
-  const headers = ['calls', 'cost']
+  const headers = [t('calls'), t('cost')]
   const metricWidths = getMetricWidths(headers, sorted.map(([, data]) => [String(data.uses), formatCost(data.cost)]))
   return (
-    <Panel title="Claude Agent Types" color={PANEL_COLORS.skills} width={pw}>
+    <Panel title={t('Claude Agent Types')} color={PANEL_COLORS.skills} width={pw}>
       <DataRow panelWidth={pw} barWidth={bw} label="" metrics={headers.map(text => ({ text, dimColor: true }))} metricWidths={metricWidths} />
       {sorted.slice(0, 10).map(([name, d]) => (
         <DataRow key={name} panelWidth={pw} barWidth={bw} label={name} bar={{ value: d.cost, max: maxCost }} metrics={[{ text: String(d.uses) }, { text: formatCost(d.cost), color: GOLD }]} metricWidths={metricWidths} />
@@ -1191,11 +1213,11 @@ export type WorkflowRow = { label: string; value: string }
 /// the panel never shows a placeholder 100%.
 export function buildWorkflowRows(data: WorkflowPanelData): WorkflowRow[] {
   const rows: WorkflowRow[] = [
-    { label: 'Corrections', value: formatCorrectionsValue(data.correctionRate, data.corrections) },
-    { label: 'First edit', value: formatFirstEditValue(data.medianTimeToFirstEditMs) },
-    { label: 'Rework', value: formatReworkValue(data.topReworkedFile) },
+    { label: t('Corrections'), value: formatCorrectionsValue(data.correctionRate, data.corrections) },
+    { label: t('First edit'), value: formatFirstEditValue(data.medianTimeToFirstEditMs) },
+    { label: t('Rework'), value: formatReworkValue(data.topReworkedFile) },
   ]
-  if (data.coverage != null) rows.push({ label: 'Coverage', value: formatCoverageValue(data.coverage) })
+  if (data.coverage != null) rows.push({ label: t('Coverage'), value: formatCoverageValue(data.coverage) })
   return rows
 }
 
@@ -1226,10 +1248,10 @@ function WorkflowInsights({ projects, pw }: { projects: ProjectSummary[]; pw: nu
   if (!hasWorkflowData(data)) return null
   const rows = buildWorkflowRows(data)
   return (
-    <Panel title="Workflow" color={PANEL_COLORS.workflow} width={pw}>
+    <Panel title={t('Workflow')} color={PANEL_COLORS.workflow} width={pw}>
       {rows.map(row => (
         <Text key={row.label} wrap="truncate-end">
-          <Text dimColor>{row.label.padEnd(WORKFLOW_LABEL_WIDTH)}</Text>
+          <Text dimColor>{padCells(row.label, WORKFLOW_LABEL_WIDTH)}</Text>
           <Text>{row.value}</Text>
         </Text>
       ))}
@@ -1248,7 +1270,10 @@ const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   kimi: 'Kimi',
   kimicode: 'Kimi Code',
 }
-function getProviderDisplayName(name: string): string { return PROVIDER_DISPLAY_NAMES[name] ?? name }
+// Every entry but `all` is a product name and stays as it is in any language.
+function getProviderDisplayName(name: string): string {
+  return name === 'all' ? t('All') : PROVIDER_DISPLAY_NAMES[name] ?? name
+}
 
 function PeriodTabs({ active, providerName, showProvider }: { active: Period; providerName?: string; showProvider?: boolean }) {
   return (
@@ -1256,7 +1281,7 @@ function PeriodTabs({ active, providerName, showProvider }: { active: Period; pr
       <Box gap={1}>
         {PERIODS.map(p => (
           <Text key={p} bold={active === p} color={active === p ? ORANGE : DIM}>
-            {active === p ? `[ ${PERIOD_LABELS[p]} ]` : `  ${PERIOD_LABELS[p]}  `}
+            {active === p ? `[ ${t(PERIOD_LABELS[p])} ]` : `  ${t(PERIOD_LABELS[p])}  `}
           </Text>
         ))}
       </Box>
@@ -1272,25 +1297,28 @@ function PeriodTabs({ active, providerName, showProvider }: { active: Period; pr
 /// accidentally bake a single-run constraint into their project's permanent
 /// instructions. Issue #277.
 function actionDestinationHeader(action: WasteAction): string {
+  // Keys shared with optimize.ts's header table so the two surfaces cannot
+  // drift apart in any language.
+  const rule = (label: string) => padCells(`── ${label} `, 64, '─')
   switch (action.type) {
     case 'file-content':
-      return `── Suggested ${action.path} addition `.padEnd(64, '─')
+      return rule(t('Suggested %s addition', action.path))
     case 'command':
-      return '── Run this command '.padEnd(64, '─')
+      return rule(t('Run this command'))
     case 'paste': {
       switch (action.destination) {
         case 'claude-md':
-          return '── Suggested CLAUDE.md addition (permanent rule) '.padEnd(64, '─')
+          return rule(t('Suggested CLAUDE.md addition (permanent rule)'))
         case 'session-opener':
-          return '── One-time session opener (do not add to CLAUDE.md) '.padEnd(64, '─')
+          return rule(t('One-time session opener (do not add to CLAUDE.md)'))
         case 'prompt':
-          return '── Ask Claude in the current session '.padEnd(64, '─')
+          return rule(t('Ask Claude in the current session'))
         case 'shell-config':
-          return '── Add to your shell config '.padEnd(64, '─')
+          return rule(t('Add to your shell config'))
         case 'manual':
-          return '── Manual action '.padEnd(64, '─')
+          return rule(t('Manual action'))
         default:
-          return '── Suggested action '.padEnd(64, '─')
+          return rule(t('Suggested action'))
       }
     }
   }
@@ -1311,8 +1339,8 @@ function FindingAction({ action }: { action: WasteAction }) {
 function FindingPanel({ index, finding, costRate, width }: { index: number; finding: WasteFinding; costRate: number; width: number }) {
   const costSaved = finding.tokensSaved * costRate
   const color = IMPACT_PANEL_COLORS[finding.impact] ?? DIM
-  const label = finding.impact.charAt(0).toUpperCase() + finding.impact.slice(1)
-  const trendBadge = finding.trend === 'improving' ? ' improving \u2193' : ''
+  const label = t(finding.impact.charAt(0).toUpperCase() + finding.impact.slice(1))
+  const trendBadge = finding.trend === 'improving' ? ` ${t('improving')} \u2193` : ''
   return (
     <Box flexDirection="column" borderStyle="round" borderColor={color} paddingX={1} width={width}>
       <Text wrap="truncate-end">
@@ -1322,7 +1350,7 @@ function FindingPanel({ index, finding, costRate, width }: { index: number; find
         {trendBadge && <Text color="#5BF5A0">{trendBadge}</Text>}
       </Text>
       <Text dimColor wrap="wrap">{finding.explanation}</Text>
-      <Text color={GOLD}>Savings: ~{formatTokens(finding.tokensSaved)} tokens (~{formatCost(costSaved)})<Text dimColor>  {findingBasis(finding)}</Text></Text>
+      <Text color={GOLD}>{t('Savings: ~%1$s tokens (~%2$s)', formatTokens(finding.tokensSaved), formatCost(costSaved))}<Text dimColor>  {findingBasis(finding)}</Text></Text>
       <Text> </Text>
       <FindingAction action={finding.fix} />
     </Box>
@@ -1360,14 +1388,14 @@ function OptimizeView({ findings, costRate, projects, label, width, healthScore,
     <Box flexDirection="column" width={width}>
       <Box flexDirection="column" borderStyle="round" borderColor={ORANGE} paddingX={1} width={width}>
         <Text wrap="truncate-end">
-          <Text bold color={ORANGE}>CodeBurn Optimize</Text>
-          <Text dimColor>  {label}   Setup: </Text>
+          <Text bold color={ORANGE}>{t('CodeBurn Optimize')}</Text>
+          <Text dimColor>{`  ${label}   ${t('Setup')}: `}</Text>
           <Text bold color={gradeColor}>{healthGrade}</Text>
           <Text dimColor> ({healthScore}/100)</Text>
         </Text>
-        <Text color="#5BF5A0" wrap="truncate-end">Savings: ~{formatTokens(totalTokens)} tokens (~{formatCost(totalCost)}, ~{pct}% of spend)</Text>
+        <Text color="#5BF5A0" wrap="truncate-end">{t('Savings: ~%1$s tokens (~%2$s, ~%3$s%% of spend)', formatTokens(totalTokens), formatCost(totalCost), pct)}</Text>
         {total > FINDINGS_WINDOW_SIZE && (
-          <Text dimColor>Showing {start + 1}–{end} of {total} · j/k to scroll</Text>
+          <Text dimColor>{t('Showing %1$d–%2$d of %3$d · j/k to scroll', start + 1, end, total)}</Text>
         )}
       </Box>
       {visible.map((f, i) => {
@@ -1384,7 +1412,7 @@ function OptimizeView({ findings, costRate, projects, label, width, healthScore,
       })}
       {appliedFixes.length > 0 && (
         <Box flexDirection="column" paddingX={1} width={width}>
-          <Text bold color={ORANGE} wrap="truncate-end">Applied fixes</Text>
+          <Text bold color={ORANGE} wrap="truncate-end">{t('Applied fixes')}</Text>
           {appliedFixes.map(fix => (
             <Text key={fix.id} color={APPLIED_FIX_COLORS[fix.verdict]} wrap="truncate-end">
               {appliedFixGlyph(fix)} {formatAppliedFix(fix)}
@@ -1402,43 +1430,43 @@ function StatusBar({ width, showProvider, view, findingCount, optimizeAvailable,
     <Box borderStyle="round" borderColor={DIM} width={width} justifyContent="center" paddingX={1}>
       <Text>
         {isOptimize
-          ? <><Text color={ORANGE} bold>b</Text><Text dimColor> back   </Text><Text color={ORANGE} bold>j</Text><Text dimColor>/</Text><Text color={ORANGE} bold>k</Text><Text dimColor> scroll   </Text></>
+          ? <><Text color={ORANGE} bold>b</Text><Text dimColor>{` ${t('back')}   `}</Text><Text color={ORANGE} bold>j</Text><Text dimColor>/</Text><Text color={ORANGE} bold>k</Text><Text dimColor>{` ${t('scroll')}   `}</Text></>
           : dayMode
-            ? <><Text color={ORANGE} bold>{'<'}</Text><Text color={ORANGE}>{'>'}</Text><Text dimColor> day   </Text></>
+            ? <><Text color={ORANGE} bold>{'<'}</Text><Text color={ORANGE}>{'>'}</Text><Text dimColor>{` ${t('day')}   `}</Text></>
             : !customRange
-            ? <><Text color={ORANGE} bold>{'<'}</Text><Text color={ORANGE}>{'>'}</Text><Text dimColor> switch   </Text></>
+            ? <><Text color={ORANGE} bold>{'<'}</Text><Text color={ORANGE}>{'>'}</Text><Text dimColor>{` ${t('switch')}   `}</Text></>
             : null}
-        <Text color={ORANGE} bold>q</Text><Text dimColor> quit</Text>
+        <Text color={ORANGE} bold>q</Text><Text dimColor>{` ${t('quit')}`}</Text>
         {!customRange && !isOptimize && (
           <>
-            <Text dimColor>   </Text><Text color={ORANGE} bold>1</Text><Text dimColor> today   </Text>
-            <Text color={ORANGE} bold>2</Text><Text dimColor> week   </Text>
-            <Text color={ORANGE} bold>3</Text><Text dimColor> 30 days   </Text>
-            <Text color={ORANGE} bold>4</Text><Text dimColor> month   </Text>
-            <Text color={ORANGE} bold>5</Text><Text dimColor> 6 months   </Text>
-            <Text color={ORANGE} bold>6</Text><Text dimColor> lifetime</Text>
+            <Text dimColor>   </Text><Text color={ORANGE} bold>1</Text><Text dimColor>{` ${t('today')}   `}</Text>
+            <Text color={ORANGE} bold>2</Text><Text dimColor>{` ${t('week')}   `}</Text>
+            <Text color={ORANGE} bold>3</Text><Text dimColor>{` ${t('30 days')}   `}</Text>
+            <Text color={ORANGE} bold>4</Text><Text dimColor>{` ${t('month')}   `}</Text>
+            <Text color={ORANGE} bold>5</Text><Text dimColor>{` ${t('6 months')}   `}</Text>
+            <Text color={ORANGE} bold>6</Text><Text dimColor>{` ${t('lifetime')}`}</Text>
           </>
         )}
         {!customRange && !isOptimize && (
           <>
-            <Text dimColor>   </Text><Text color={ORANGE} bold>d</Text><Text dimColor>{dayMode ? ' exit day' : ' yesterday'}</Text>
+            <Text dimColor>   </Text><Text color={ORANGE} bold>d</Text><Text dimColor>{dayMode ? ` ${t('exit day')}` : ` ${t('yesterday')}`}</Text>
           </>
         )}
         {!isOptimize && optimizeAvailable && (
-          <><Text dimColor>   </Text><Text color={ORANGE} bold>o</Text><Text dimColor> optimize</Text>{findingCount != null && findingCount > 0 ? <Text color="#F55B5B"> ({findingCount})</Text> : null}</>
+          <><Text dimColor>   </Text><Text color={ORANGE} bold>o</Text><Text dimColor>{` ${t('optimize')}`}</Text>{findingCount != null && findingCount > 0 ? <Text color="#F55B5B"> ({findingCount})</Text> : null}</>
         )}
         {!isOptimize && compareAvailable && (
-          <><Text dimColor>   </Text><Text color={ORANGE} bold>c</Text><Text dimColor> compare</Text></>
+          <><Text dimColor>   </Text><Text color={ORANGE} bold>c</Text><Text dimColor>{` ${t('compare')}`}</Text></>
         )}
         {!isOptimize && !customRange && !dayMode && view === 'dashboard' && (
           <>
-            <Text dimColor>   </Text><Text color={PANEL_COLORS.daily} bold>j</Text><Text dimColor>/</Text><Text color={PANEL_COLORS.daily} bold>k</Text><Text dimColor> daily   </Text>
-            <Text color={PANEL_COLORS.daily} bold>Space</Text><Text dimColor> daily page</Text>
+            <Text dimColor>   </Text><Text color={PANEL_COLORS.daily} bold>j</Text><Text dimColor>/</Text><Text color={PANEL_COLORS.daily} bold>k</Text><Text dimColor>{` ${t('daily')}   `}</Text>
+            <Text color={PANEL_COLORS.daily} bold>Space</Text><Text dimColor>{` ${t('daily page')}`}</Text>
           </>
         )}
-        {showProvider && (<><Text dimColor>   </Text><Text color={ORANGE} bold>p</Text><Text dimColor> provider</Text></>)}
-        <Text dimColor>   </Text><Text color={ORANGE} bold>↑</Text><Text dimColor>/</Text><Text color={ORANGE} bold>↓</Text><Text dimColor> scroll   </Text>
-        <Text color={ORANGE} bold>PgUp</Text><Text dimColor>/</Text><Text color={ORANGE} bold>PgDn</Text><Text dimColor> page</Text>
+        {showProvider && (<><Text dimColor>   </Text><Text color={ORANGE} bold>p</Text><Text dimColor>{` ${t('provider')}`}</Text></>)}
+        <Text dimColor>   </Text><Text color={ORANGE} bold>↑</Text><Text dimColor>/</Text><Text color={ORANGE} bold>↓</Text><Text dimColor>{` ${t('scroll')}   `}</Text>
+        <Text color={ORANGE} bold>PgUp</Text><Text dimColor>/</Text><Text color={ORANGE} bold>PgDn</Text><Text dimColor>{` ${t('page')}`}</Text>
       </Text>
     </Box>
   )
@@ -1447,8 +1475,8 @@ function StatusBar({ width, showProvider, view, findingCount, optimizeAvailable,
 function DashboardContent({ projects, period, columns, maxContentWidth, activeProvider, budgets, planUsages, label, dayMode, dailyHistoryProjects, dailyHistoryPageSize, scrollableDailyHistory = false, dailyHistoryCursor = 0, dailyHistoryLoading = false, durable }: { projects: ProjectSummary[]; period: Period; columns?: number; maxContentWidth: number; activeProvider?: string; budgets?: Map<string, ContextBudget>; planUsages?: PlanUsage[]; label?: string; dayMode?: boolean; dailyHistoryProjects?: ProjectSummary[]; dailyHistoryPageSize?: number; scrollableDailyHistory?: boolean; dailyHistoryCursor?: number; dailyHistoryLoading?: boolean; durable?: DurableOverview }) {
   const { dashWidth, columnCount, panelWidth, barWidth } = getLayout(columns, maxContentWidth)
   const isCursor = activeProvider === 'cursor'
-  const activeLabel = label ?? PERIOD_LABELS[period]
-  if (showEmptyState(projects.length, scrollableDailyHistory, (dailyHistoryProjects ?? []).length, dailyHistoryLoading)) return <Panel title="CodeBurn" color={ORANGE} width={dashWidth}><Text dimColor>No usage data found for {activeLabel}.</Text></Panel>
+  const activeLabel = label ?? t(PERIOD_LABELS[period])
+  if (showEmptyState(projects.length, scrollableDailyHistory, (dailyHistoryProjects ?? []).length, dailyHistoryLoading)) return <Panel title="CodeBurn" color={ORANGE} width={dashWidth}><Text dimColor>{t('No usage data found for %s.', activeLabel)}</Text></Panel>
   const projectRows = Math.min(projects.length, getProjectBreakdownRowLimit(period, dayMode))
   const days = dailyHistoryPageSize ?? getDailyActivityPageSize(columnCount, projectRows, getActivityBreakdownRowCount(projects), dayMode)
   // A provider-scoped plan (e.g. SuperGrok) only makes sense on its own
@@ -1465,7 +1493,7 @@ function DashboardContent({ projects, period, columns, maxContentWidth, activePr
         <ActivityBreakdown projects={projects} pw={panelWidth} bw={barWidth} />
         <ModelBreakdown projects={projects} pw={panelWidth} bw={barWidth} />
         {isCursor
-          ? <><ToolBreakdown projects={projects} pw={panelWidth} bw={barWidth} title="Languages" filterPrefix="lang:" /><WorkflowInsights projects={projects} pw={panelWidth} /></>
+          ? <><ToolBreakdown projects={projects} pw={panelWidth} bw={barWidth} title={t('Languages')} filterPrefix="lang:" /><WorkflowInsights projects={projects} pw={panelWidth} /></>
           : <>
               <McpBreakdown projects={projects} pw={panelWidth} bw={barWidth} />
               <ToolBreakdown projects={projects} pw={panelWidth} bw={barWidth} />
@@ -2069,7 +2097,7 @@ export function InteractiveDashboard({ initialProjects, initialDailyHistoryProje
     else if (input === '6') switchPeriodImmediate('lifetime')
   })
 
-  const headerLabel = dayDate ? formatDayRangeLabel(dayDate) : customRangeLabel ?? PERIOD_LABELS[period]
+  const headerLabel = dayDate ? dayHeaderLabel(dayDate) : customRangeLabel ?? t(PERIOD_LABELS[period])
   const coachingNote = view === 'dashboard' ? selectRotatingNote(coachingNotes, noteTick) : null
 
   const content = loading || optimizeLoading
@@ -2082,14 +2110,14 @@ export function InteractiveDashboard({ initialProjects, initialDailyHistoryProje
         {view === 'compare'
           ? <Box flexDirection="column" paddingX={2} paddingY={1}>
               <Box flexDirection="column" borderStyle="round" borderColor={ORANGE} paddingX={1}>
-                <Text bold color={ORANGE}>Model Comparison</Text>
+                <Text bold color={ORANGE}>{t('Model Comparison')}</Text>
                 <Text> </Text>
-                <Text dimColor>Loading {headerLabel} model data...</Text>
+                <Text dimColor>{t('Loading %s model data...', headerLabel)}</Text>
               </Box>
             </Box>
           : view === 'optimize'
-            ? <Panel title="CodeBurn Optimize" color={ORANGE} width={dashWidth}><Text dimColor>Scanning {headerLabel}...</Text></Panel>
-            : <Panel title="CodeBurn" color={ORANGE} width={dashWidth}><Text dimColor>Loading {headerLabel}...</Text></Panel>}
+            ? <Panel title={t('CodeBurn Optimize')} color={ORANGE} width={dashWidth}><Text dimColor>{t('Scanning %s...', headerLabel)}</Text></Panel>
+            : <Panel title="CodeBurn" color={ORANGE} width={dashWidth}><Text dimColor>{t('Loading %s...', headerLabel)}</Text></Panel>}
         {quitArmed && indexing && <QuitConfirmationBanner width={dashWidth} />}
         {view !== 'compare' && <StatusBar width={dashWidth} showProvider={multipleProviders} view={view} findingCount={0} optimizeAvailable={false} compareAvailable={false} customRange={isCustomRange} dayMode={isDayMode} />}
       </Box>
@@ -2107,7 +2135,7 @@ export function InteractiveDashboard({ initialProjects, initialDailyHistoryProje
             : <DashboardContent projects={projects} period={period} columns={columns} maxContentWidth={maxContentWidth} activeProvider={activeProvider} budgets={projectBudgets} planUsages={planUsages} label={headerLabel} dayMode={isDayMode} dailyHistoryProjects={dailyHistoryProjects} dailyHistoryPageSize={dailyHistoryPageSize} scrollableDailyHistory={scrollableDailyHistory} dailyHistoryCursor={Math.min(dailyHistoryCursor, dailyHistoryMaxCursor)} durable={durable} />}
         {coachingNote && (
           <Box width={dashWidth} paddingX={1}>
-            <Text wrap="truncate-end"><Text color={ORANGE} bold>tip </Text><Text dimColor>{coachingNote}</Text></Text>
+            <Text wrap="truncate-end"><Text color={ORANGE} bold>{`${t('tip')} `}</Text><Text dimColor>{coachingNote}</Text></Text>
           </Box>
         )}
         {quitArmed && indexing && <QuitConfirmationBanner width={dashWidth} />}
@@ -2131,25 +2159,29 @@ export function InteractiveDashboard({ initialProjects, initialDailyHistoryProje
 function IndexingBanner({ width, done, total, cold, phase, visiblePeriod }: { width: number; done: number; total: number; cold: boolean; phase: DashboardIndexPhase; visiblePeriod: Period }) {
   const largeFirstIndex = cold && total >= LARGE_HISTORY_FILE_THRESHOLD
   const sharedIndexLabel = phase === 'cached'
-    ? 'loading normalized cache; source refresh pending'
+    ? t('loading normalized cache; source refresh pending')
     : phase === 'refreshing'
-      ? 'cached periods ready; refreshing changed source files'
+      ? t('cached periods ready; refreshing changed source files')
       : phase === 'week'
-        ? 'Today ready; loading 7 Days'
-        : `${PERIOD_LABELS[DASHBOARD_COLD_INDEX_PHASES[Math.max(0, DASHBOARD_COLD_INDEX_PHASES.indexOf(phase) - 1)]!]} ready; loading ${PERIOD_LABELS[phase]}`
-  const readyLabel = `${PERIOD_LABELS[visiblePeriod]} visible · shared index: ${sharedIndexLabel}`
+        ? t('%1$s ready; loading %2$s', t(PERIOD_LABELS['today']), t(PERIOD_LABELS['week']))
+        : t(
+            '%1$s ready; loading %2$s',
+            t(PERIOD_LABELS[DASHBOARD_COLD_INDEX_PHASES[Math.max(0, DASHBOARD_COLD_INDEX_PHASES.indexOf(phase) - 1)]!]),
+            t(PERIOD_LABELS[phase]),
+          )
+  const readyLabel = t('%1$s visible · shared index: %2$s', t(PERIOD_LABELS[visiblePeriod]), sharedIndexLabel)
   const count = cold && total > 0
-    ? ` · ${Math.min(done, total)} source files parsed · ${total} deferred at first paint`
+    ? t(' · %1$d source files parsed · %2$d deferred at first paint', Math.min(done, total), total)
     : ''
   return (
     <Box width={width} paddingX={1} flexDirection="column">
       <Text wrap="truncate-end">
-        <Text color={ORANGE} bold>{phase === 'refreshing' ? 'refreshing ' : phase === 'cached' ? 'cached ' : 'indexing '}</Text>
+        <Text color={ORANGE} bold>{phase === 'refreshing' ? `${t('refreshing')} ` : phase === 'cached' ? `${t('cached')} ` : `${t('indexing')} `}</Text>
         <Text dimColor>
           {readyLabel}{count}
         </Text>
       </Text>
-      {largeFirstIndex && <Text color={ORANGE}>large first index · may take a few minutes</Text>}
+      {largeFirstIndex && <Text color={ORANGE}>{t('large first index · may take a few minutes')}</Text>}
     </Box>
   )
 }
@@ -2162,11 +2194,11 @@ function QuitConfirmationBanner({ width }: { width: number }) {
   return (
     <Box borderStyle="round" borderColor={DIM} width={width} justifyContent="center" paddingX={1}>
       <Text wrap="truncate-end">
-        <Text dimColor>Finishing background index so the next launch starts warm - press </Text>
+        <Text dimColor>{t('Finishing background index so the next launch starts warm - press ')}</Text>
         <Text color={ORANGE} bold>q</Text>
-        <Text dimColor> or </Text>
+        <Text dimColor>{t(' or ')}</Text>
         <Text color={ORANGE} bold>Ctrl+C</Text>
-        <Text dimColor> again to quit now</Text>
+        <Text dimColor>{t(' again to quit now')}</Text>
       </Text>
     </Box>
   )
@@ -2183,7 +2215,7 @@ function DayBanner({ label, width }: { label: string; width: number }) {
 function CustomRangeBanner({ label, width }: { label: string; width: number }) {
   return (
     <Box width={width} paddingX={1} marginBottom={1}>
-      <Text dimColor>Custom range: </Text>
+      <Text dimColor>{t('Custom range: ')}</Text>
       <Text color={ORANGE} bold>{label}</Text>
     </Box>
   )
@@ -2195,7 +2227,7 @@ function StaticDashboard({ projects, period, activeProvider, planUsages, label, 
   const { dashWidth } = getLayout(columns, maxContentWidth)
   return (
     <Box flexDirection="column" width={dashWidth}>
-      {dayMode ? <DayBanner label={label ?? PERIOD_LABELS[period]} width={dashWidth} /> : <PeriodTabs active={period} />}
+      {dayMode ? <DayBanner label={label ?? t(PERIOD_LABELS[period])} width={dashWidth} /> : <PeriodTabs active={period} />}
       <DashboardContent projects={projects} period={period} columns={columns} maxContentWidth={maxContentWidth} activeProvider={activeProvider} planUsages={planUsages} label={label} dayMode={dayMode} durable={durable} />
     </Box>
   )
@@ -2441,7 +2473,7 @@ export async function renderDashboard(period: Period = 'week', provider: string 
     process.stderr.write(`codeburn: progressive startup ${progressive ? 'on' : 'off'}, ${paint.deferredFiles} files deferred to the background index\n`)
   }
   const { period: opened, scannedProjects, filteredProjects, planUsages, initialDurable } = paint.result
-  const label = initialDay ? formatDayRangeLabel(initialDay) : customRangeLabel
+  const label = initialDay ? dayHeaderLabel(initialDay) : customRangeLabel
   patchStdoutForWindows()
   if (isTTY) {
     let lastQuitByteAt = 0

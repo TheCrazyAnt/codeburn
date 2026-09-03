@@ -3,7 +3,8 @@ import { render, Box, Text, useInput, useApp, useStdout } from 'ink'
 
 import type { ModelStats, ComparisonRow, CategoryComparison, WorkingStyleRow } from './compare-stats.js'
 import { aggregateModelStats, computeComparison, computeCategoryComparison, computeWorkingStyle, findModelStat, scanSelfCorrections } from './compare-stats.js'
-import { formatCost } from './format.js'
+import { formatCost, padCells } from './format.js'
+import { t } from './i18n.js'
 import { parseAllSessions, setInteractiveScanUI } from './parser.js'
 import { getAllProviders } from './providers/index.js'
 import type { ProjectSummary, DateRange } from './types.js'
@@ -97,9 +98,9 @@ function ModelSelector({ models, recommendations, onSelect, onBack }: ModelSelec
   return (
     <Box flexDirection="column" paddingX={2} paddingY={1}>
       <Box flexDirection="column" borderStyle="round" borderColor={ORANGE} paddingX={1}>
-        <Text bold color={ORANGE}>Model Comparison</Text>
+        <Text bold color={ORANGE}>{t('Model Comparison')}</Text>
         <Text> </Text>
-        <Text color={DIM}>Select two models to compare:</Text>
+        <Text color={DIM}>{t('Select two models to compare:')}</Text>
         <Text> </Text>
         {models.map((m, i) => {
           const isCursor = i === cursor
@@ -110,28 +111,28 @@ function ModelSelector({ models, recommendations, onSelect, onBack }: ModelSelec
             <Text key={m.model}>
               <Text color={isCursor ? ORANGE : undefined}>{prefix}</Text>
               <Text bold={isSelected} color={isSelected ? GREEN : undefined}>
-                {shortName(m.model).padEnd(MODEL_NAME_COL)}
+                {padCells(shortName(m.model), MODEL_NAME_COL)}
               </Text>
-              <Text>{m.calls.toLocaleString().padStart(8)} calls</Text>
+              <Text>{t('%s calls', m.calls.toLocaleString().padStart(8))}</Text>
               <Text color={GOLD}>{formatCost(m.cost).padStart(10)}</Text>
-              {isSelected && <Text color={GREEN}>   [selected]</Text>}
-              {lowData && <Text color={DIM}>   low data</Text>}
+              {isSelected && <Text color={GREEN}>{'   ' + t('[selected]')}</Text>}
+              {lowData && <Text color={DIM}>{'   ' + t('low data')}</Text>}
             </Text>
           )
         })}
       </Box>
       <Text> </Text>
       <Text>
-        <Text color={ORANGE} bold>[space]</Text><Text dimColor> select  </Text>
-        <Text color={ORANGE} bold>[enter]</Text><Text dimColor> compare  </Text>
-        <Text color={ORANGE} bold>{'<>'}</Text><Text dimColor> switch period  </Text>
-        <Text color={ORANGE} bold>[esc]</Text><Text dimColor> back  </Text>
-        <Text color={ORANGE} bold>[q]</Text><Text dimColor> quit</Text>
+        <Text color={ORANGE} bold>[space]</Text><Text dimColor>{' ' + t('select') + '  '}</Text>
+        <Text color={ORANGE} bold>[enter]</Text><Text dimColor>{' ' + t('compare') + '  '}</Text>
+        <Text color={ORANGE} bold>{'<>'}</Text><Text dimColor>{' ' + t('switch period') + '  '}</Text>
+        <Text color={ORANGE} bold>[esc]</Text><Text dimColor>{' ' + t('back') + '  '}</Text>
+        <Text color={ORANGE} bold>[q]</Text><Text dimColor>{' ' + t('quit')}</Text>
       </Text>
 
       {recommendations.length > 0 && (
         <Box flexDirection="column" marginTop={1} borderStyle="round" borderColor={ORANGE} paddingX={1}>
-          <Text bold color={ORANGE}>Model defaults recommendation</Text>
+          <Text bold color={ORANGE}>{t('Model defaults recommendation')}</Text>
           <Text> </Text>
           {recommendations.map(rec => (
             <Box flexDirection="column" key={rec.project} marginBottom={1}>
@@ -141,9 +142,9 @@ function ModelSelector({ models, recommendations, onSelect, onBack }: ModelSelec
                 <Text>{' -> '}</Text>
                 <Text bold color={GREEN}>{rec.candidateModel}</Text>
               </Text>
-              <Text color={DIM}>  Current:  {(rec.currentOneShotRate*100).toFixed(1)}% one-shot over {rec.currentEditTurns} edits, {formatCost(rec.currentCostPerEdit)}/edit</Text>
-              <Text color={DIM}>  Candidate: {(rec.candidateOneShotRate*100).toFixed(1)}% one-shot over {rec.candidateEditTurns} edits, {formatCost(rec.candidateCostPerEdit)}/edit</Text>
-              <Text>  To apply: <Text color="#00FFFF">codeburn act apply-model {rec.project}</Text></Text>
+              <Text color={DIM}>{'  ' + t('Current:') + '  ' + t('%1$s%% one-shot over %2$d edits, %3$s/edit', (rec.currentOneShotRate*100).toFixed(1), rec.currentEditTurns, formatCost(rec.currentCostPerEdit))}</Text>
+              <Text color={DIM}>{'  ' + t('Candidate:') + ' ' + t('%1$s%% one-shot over %2$d edits, %3$s/edit', (rec.candidateOneShotRate*100).toFixed(1), rec.candidateEditTurns, formatCost(rec.candidateCostPerEdit))}</Text>
+              <Text>{'  ' + t('To apply:') + ' '}<Text color="#00FFFF">codeburn act apply-model {rec.project}</Text></Text>
             </Box>
           ))}
         </Box>
@@ -175,7 +176,7 @@ function MetricPanel({ title, rows, nameA, nameB, pw }: { title: string; rows: C
         const fmtB = formatValue(row.valueB, row.formatFn)
         return (
           <Text key={row.label}>
-            <Text color={DIM}>{row.label.padEnd(LABEL_WIDTH)}</Text>
+            <Text color={DIM}>{padCells(t(row.label), LABEL_WIDTH)}</Text>
             <Text color={row.winner === 'a' ? GREEN : undefined}>{fmtA.padStart(VALUE_WIDTH)}</Text>
             <Text color={row.winner === 'b' ? GREEN : undefined}>{fmtB.padStart(VALUE_WIDTH)}</Text>
           </Text>
@@ -196,7 +197,7 @@ function ContextPanel({ title, rows, nameA, nameB, pw, lowDataWarning }: { title
       </Text>
       {rows.map(row => (
         <Text key={row.label}>
-          <Text color={DIM}>{row.label.padEnd(LABEL_WIDTH)}</Text>
+          <Text color={DIM}>{padCells(t(row.label), LABEL_WIDTH)}</Text>
           <Text color={DIM}>{row.valueA.padStart(VALUE_WIDTH)}</Text>
           <Text color={DIM}>{row.valueB.padStart(VALUE_WIDTH)}</Text>
         </Text>
@@ -250,8 +251,15 @@ function ComparisonResults({ modelA, modelB, rows, categories, workingStyle, onB
     { label: 'Self-corrections', valueA: modelA.selfCorrections.toLocaleString(), valueB: modelB.selfCorrections.toLocaleString() },
   ]
 
+  // Two whole sentences rather than a spliced verb: the plural agreement moves
+  // with the sentence, and the name list is joined by its own key.
+  const lowDataNames = lowDataA && lowDataB
+    ? t('%1$s and %2$s', shortName(modelA.model), shortName(modelB.model))
+    : lowDataA ? shortName(modelA.model) : shortName(modelB.model)
   const lowDataWarning = (lowDataA || lowDataB)
-    ? `Note: ${[lowDataA && shortName(modelA.model), lowDataB && shortName(modelB.model)].filter(Boolean).join(' and ')} ha${lowDataA && lowDataB ? 've' : 's'} fewer than ${LOW_DATA_THRESHOLD} calls`
+    ? (lowDataA && lowDataB
+      ? t('Note: %1$s have fewer than %2$d calls', lowDataNames, LOW_DATA_THRESHOLD)
+      : t('Note: %1$s has fewer than %2$d calls', lowDataNames, LOW_DATA_THRESHOLD))
     : undefined
 
   const pw = wide ? halfWidth : dashWidth
@@ -267,14 +275,14 @@ function ComparisonResults({ modelA, modelB, rows, categories, workingStyle, onB
       </Box>
 
       <Box width={dashWidth}>
-        <MetricPanel title={sectionOrder[0] ?? 'Performance'} rows={sectionRows.get(sectionOrder[0] ?? '') ?? []} nameA={nameA} nameB={nameB} pw={pw} />
-        <MetricPanel title={sectionOrder[1] ?? 'Efficiency'} rows={sectionRows.get(sectionOrder[1] ?? '') ?? []} nameA={nameA} nameB={nameB} pw={pw} />
+        <MetricPanel title={t(sectionOrder[0] ?? 'Performance')} rows={sectionRows.get(sectionOrder[0] ?? '') ?? []} nameA={nameA} nameB={nameB} pw={pw} />
+        <MetricPanel title={t(sectionOrder[1] ?? 'Efficiency')} rows={sectionRows.get(sectionOrder[1] ?? '') ?? []} nameA={nameA} nameB={nameB} pw={pw} />
       </Box>
 
       {categories.length > 0 && (
         <Box flexDirection="column" borderStyle="round" borderColor={ORANGE} paddingX={1} width={dashWidth}>
-          <Text bold color={ORANGE}>Category Head-to-Head</Text>
-          <Text color={DIM}>one-shot rate per category</Text>
+          <Text bold color={ORANGE}>{t('Category Head-to-Head')}</Text>
+          <Text color={DIM}>{t('one-shot rate per category')}</Text>
           <Text>
             <Text>{'  '}</Text>
             <Text color={BAR_A}>{FULL_BLOCK + FULL_BLOCK}</Text>
@@ -293,7 +301,7 @@ function ComparisonResults({ modelA, modelB, rows, categories, workingStyle, onB
             return (
               <React.Fragment key={cat.category}>
                 <Text> </Text>
-                <Text color={DIM}>{'  '}{cat.category}</Text>
+                <Text color={DIM}>{'  '}{t(cat.category)}</Text>
                 <Text>
                   <Text>{'  '}</Text>
                   <Text color={BAR_A}>{FULL_BLOCK.repeat(Math.max(bwA, 1))}</Text>
@@ -316,15 +324,15 @@ function ComparisonResults({ modelA, modelB, rows, categories, workingStyle, onB
 
       <Box width={dashWidth}>
         {workingStyle.length > 0 && (
-          <ContextPanel title="Working Style" rows={workingStyle.map(r => ({ label: r.label, valueA: formatValue(r.valueA, r.formatFn), valueB: formatValue(r.valueB, r.formatFn) }))} nameA={nameA} nameB={nameB} pw={pw} />
+          <ContextPanel title={t('Working Style')} rows={workingStyle.map(r => ({ label: r.label, valueA: formatValue(r.valueA, r.formatFn), valueB: formatValue(r.valueB, r.formatFn) }))} nameA={nameA} nameB={nameB} pw={pw} />
         )}
-        <ContextPanel title="Context" rows={contextRows} nameA={nameA} nameB={nameB} pw={pw} lowDataWarning={lowDataWarning} />
+        <ContextPanel title={t('Context')} rows={contextRows} nameA={nameA} nameB={nameB} pw={pw} lowDataWarning={lowDataWarning} />
       </Box>
 
       <Text>
-        <Text color={ORANGE} bold>{'<>'}</Text><Text dimColor> switch period  </Text>
-        <Text color={ORANGE} bold>[esc]</Text><Text dimColor> back  </Text>
-        <Text color={ORANGE} bold>[q]</Text><Text dimColor> quit</Text>
+        <Text color={ORANGE} bold>{'<>'}</Text><Text dimColor>{' ' + t('switch period') + '  '}</Text>
+        <Text color={ORANGE} bold>[esc]</Text><Text dimColor>{' ' + t('back') + '  '}</Text>
+        <Text color={ORANGE} bold>[q]</Text><Text dimColor>{' ' + t('quit')}</Text>
       </Text>
     </Box>
   )
@@ -455,14 +463,14 @@ export function CompareView({ projects, onBack, presetModels }: CompareViewProps
     return (
       <Box flexDirection="column" paddingX={2} paddingY={1}>
         <Box flexDirection="column" borderStyle="round" borderColor={ORANGE} paddingX={1}>
-          <Text bold color={ORANGE}>Model Comparison</Text>
+          <Text bold color={ORANGE}>{t('Model Comparison')}</Text>
           <Text> </Text>
-          <Text color={DIM}>Need at least 2 models to compare. Found {models.length}.</Text>
+          <Text color={DIM}>{t('Need at least 2 models to compare. Found %d.', models.length)}</Text>
         </Box>
         <Text> </Text>
         <Text>
-          <Text color={ORANGE} bold>[esc]</Text><Text dimColor> back  </Text>
-          <Text color={ORANGE} bold>[q]</Text><Text dimColor> quit</Text>
+          <Text color={ORANGE} bold>[esc]</Text><Text dimColor>{' ' + t('back') + '  '}</Text>
+          <Text color={ORANGE} bold>[q]</Text><Text dimColor>{' ' + t('quit')}</Text>
         </Text>
       </Box>
     )
@@ -477,9 +485,9 @@ export function CompareView({ projects, onBack, presetModels }: CompareViewProps
     return (
       <Box flexDirection="column" paddingX={2} paddingY={1}>
         <Box flexDirection="column" borderStyle="round" borderColor={ORANGE} paddingX={1}>
-          <Text bold color={ORANGE}>Model Comparison</Text>
+          <Text bold color={ORANGE}>{t('Model Comparison')}</Text>
           <Text> </Text>
-          <Text color={DIM}>Scanning self-corrections...</Text>
+          <Text color={DIM}>{t('Scanning self-corrections...')}</Text>
         </Box>
       </Box>
     )
@@ -515,7 +523,7 @@ export async function renderCompare(range: DateRange, provider: string, modelA?:
   setInteractiveScanUI()
   const isTTY = process.stdin.isTTY && process.stdout.isTTY
   if (!isTTY) {
-    process.stdout.write('Model comparison requires an interactive terminal.\n')
+    process.stdout.write(t('Model comparison requires an interactive terminal.') + '\n')
     return
   }
 
@@ -531,11 +539,11 @@ export async function renderCompare(range: DateRange, provider: string, modelA?:
     const a = findModelStat(models, modelA)
     const b = findModelStat(models, modelB)
     if (!a) {
-      process.stderr.write(`codeburn compare: model not found: "${modelA}".\n`)
+      process.stderr.write(t('codeburn compare: model not found: "%s".', modelA) + '\n')
       process.exit(1)
     }
     if (!b) {
-      process.stderr.write(`codeburn compare: model not found: "${modelB}".\n`)
+      process.stderr.write(t('codeburn compare: model not found: "%s".', modelB) + '\n')
       process.exit(1)
     }
     presetModels = [a.model, b.model]

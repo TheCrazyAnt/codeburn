@@ -16,6 +16,7 @@ import {
 } from './session-cache.js'
 import { renderTable } from './text-table.js'
 import { collectLauncherNotes, type LauncherNote } from './launcher-homes.js'
+import { t, tn } from './i18n.js'
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -202,10 +203,6 @@ function derivePathsFromSources(sourcePaths: string[]): DoctorProbePath[] {
   return [...dirs].sort().map(path => ({ path, label: 'discovered', exists: existsSync(path) }))
 }
 
-function pluralSessions(n: number): string {
-  return `${n} session${n === 1 ? '' : 's'}`
-}
-
 function emptyVerdict(
   probePaths: DoctorProbePath[],
   envOverrides: DoctorEnvOverride[],
@@ -220,21 +217,21 @@ function emptyVerdict(
   // No known probe roots to check: honest, override-aware fallback.
   if (known.length === 0) {
     return hasOverride
-      ? `NOTHING FOUND (override ${overrideNames} set, but nothing was discovered)`
-      : 'NOTHING FOUND (tool likely not installed or no history yet)'
+      ? t('NOTHING FOUND (override %s set, but nothing was discovered)', overrideNames)
+      : t('NOTHING FOUND (tool likely not installed or no history yet)')
   }
   // With an override set, a missing probed path is the likely culprit; name it
   // so the row itself points at the misconfiguration (Details lists them all).
   if (hasOverride) {
     return missing.length > 0
-      ? `NOTHING FOUND (override ${overrideNames} set; ${missing[0]!.path} does not exist)`
-      : `NOTHING FOUND (override ${overrideNames} set; ${present[0]!.path} holds no sessions)`
+      ? t('NOTHING FOUND (override %s set; %s does not exist)', overrideNames, missing[0]!.path)
+      : t('NOTHING FOUND (override %s set; %s holds no sessions)', overrideNames, present[0]!.path)
   }
   // No override. If every probed path is missing, the tool is likely not
   // installed; if some exist, the data dir is there but empty (no history).
   return present.length === 0
-    ? `NOTHING FOUND (${missing[0]!.path} does not exist; tool likely not installed)`
-    : `NOTHING FOUND (${present[0]!.path} exists but holds no sessions; no history yet)`
+    ? t('NOTHING FOUND (%s does not exist; tool likely not installed)', missing[0]!.path)
+    : t('NOTHING FOUND (%s exists but holds no sessions; no history yet)', present[0]!.path)
 }
 
 async function collectOneProvider(
@@ -283,14 +280,18 @@ async function collectOneProvider(
     if (provider.network) {
       base.status = 'network'
       base.verdict = base.candidatesFound > 0
-        ? `NETWORK (${base.candidatesFound} source configured; parse skipped offline)`
-        : 'NETWORK (not configured; no API key)'
+        ? t('NETWORK (%d source configured; parse skipped offline)', base.candidatesFound)
+        : t('NETWORK (not configured; no API key)')
       return base
     }
 
     if (sources.length > 0 && PARSE_SPAWNS.has(provider.name)) {
       base.status = 'ok'
-      base.verdict = `OK (${pluralSessions(sources.length)}; parse sample skipped, provider probes live processes)`
+      base.verdict = tn(
+        'OK (%d session; parse sample skipped, provider probes live processes)',
+        'OK (%d sessions; parse sample skipped, provider probes live processes)',
+        sources.length,
+      )
       return base
     }
 
@@ -315,18 +316,24 @@ async function collectOneProvider(
 
     if (base.parseFailed > 0) {
       base.status = 'errors'
-      base.verdict = `ERRORS (${base.parseFailed}/${base.sampled} sampled file${base.sampled === 1 ? '' : 's'} failed to parse)`
+      base.verdict = tn(
+        'ERRORS (%d/%d sampled file failed to parse)',
+        'ERRORS (%d/%d sampled files failed to parse)',
+        base.sampled,
+        base.parseFailed,
+        base.sampled,
+      )
     } else if (base.candidatesFound === 0) {
       base.status = 'empty'
       base.verdict = emptyVerdict(base.probePaths, base.envOverrides)
     } else {
       base.status = 'ok'
-      base.verdict = `OK (${pluralSessions(base.candidatesFound)})`
+      base.verdict = tn('OK (%d session)', 'OK (%d sessions)', base.candidatesFound)
     }
   } catch (err) {
     base.status = 'error'
     base.error = err instanceof Error ? err.message : String(err)
-    base.verdict = `ERROR (${base.error})`
+    base.verdict = t('ERROR (%s)', base.error)
   }
 
   return base
@@ -459,7 +466,7 @@ export function renderDoctorTable(
   const out: string[] = []
 
   const n = report.providers.length
-  out.push(c.bold('CodeBurn doctor') + c.dim(`   ${n} provider${n === 1 ? '' : 's'}   ${report.generatedAt.slice(0, 19).replace('T', ' ')} UTC`))
+  out.push(c.bold(t('CodeBurn doctor')) + c.dim(`   ${tn('%d provider', '%d providers', n)}   ${report.generatedAt.slice(0, 19).replace('T', ' ')} UTC`))
   out.push('')
 
   const colorVerdict = (r: DoctorProviderReport): string => {
@@ -479,11 +486,11 @@ export function renderDoctorTable(
 
   out.push(renderTable(
     [
-      { header: 'Provider' },
-      { header: 'Sessions', right: true },
-      { header: 'Parsed', right: true },
-      { header: 'Cached', right: true },
-      { header: 'Verdict' },
+      { header: t('Provider') },
+      { header: t('Sessions'), right: true },
+      { header: t('Parsed'), right: true },
+      { header: t('Cached'), right: true },
+      { header: t('Verdict') },
     ],
     rows,
     { color: opts.color },
@@ -503,25 +510,25 @@ export function renderDoctorTable(
   )
   if (detail.length > 0) {
     out.push('')
-    out.push(c.bold('Details'))
+    out.push(c.bold(t('Details')))
     for (const r of detail) {
       out.push('  ' + c.bold(r.displayName))
       for (const o of r.envOverrides) {
-        out.push('    ' + c.dim('override ') + `${o.name}=${o.value}`)
+        out.push('    ' + c.dim(t('override') + ' ') + `${o.name}=${o.value}`)
       }
       for (const p of r.probePaths) {
-        const mark = p.exists ? c.green('exists') : c.red('missing')
+        const mark = p.exists ? c.green(t('exists')) : c.red(t('missing'))
         out.push('    ' + c.dim(`${p.label}: `) + p.path + ' ' + c.dim('(') + mark + c.dim(')'))
       }
-      if (r.parseVersion) out.push('    ' + c.dim('parser: ') + r.parseVersion)
-      if (r.cachedFailed > 0) out.push('    ' + c.dim('cached parse failures: ') + String(r.cachedFailed))
-      if (r.error) out.push('    ' + c.red('error: ') + r.error)
+      if (r.parseVersion) out.push('    ' + c.dim(t('parser:') + ' ') + r.parseVersion)
+      if (r.cachedFailed > 0) out.push('    ' + c.dim(t('cached parse failures:') + ' ') + String(r.cachedFailed))
+      if (r.error) out.push('    ' + c.red(t('error:') + ' ') + r.error)
     }
   }
 
   if (report.launchers && report.launchers.length > 0) {
     out.push('')
-    out.push(c.bold('Launchers'))
+    out.push(c.bold(t('Launchers')))
     for (const launcher of report.launchers) {
       out.push(`  ${launcher.name}  ${c.dim(launcher.path)}  ${launcher.verdict}`)
     }
@@ -529,31 +536,36 @@ export function renderDoctorTable(
 
   if (report.cacheHealth) {
     out.push('')
-    out.push(c.bold('Cache health') + c.dim('  (issue #1127 diagnostics — under-read cache entries)'))
+    out.push(c.bold(t('Cache health')) + c.dim('  ' + t('(issue #1127 diagnostics — under-read cache entries)')))
     for (const date of report.cacheHealth.residueOnlyDays) {
-      out.push('  ' + c.yellow(date) + c.dim('  residue-only day (turn counts but no calls/cost); re-derived on next launch'))
+      out.push('  ' + c.yellow(date) + c.dim('  ' + t('residue-only day (turn counts but no calls/cost); re-derived on next launch')))
     }
     for (const issue of report.cacheHealth.sessionCacheIssues) {
       out.push(
         '  ' + c.dim(`${issue.provider}  `) + issue.path +
-        c.dim(issue.reason === 'failed' ? '  (cached parse failure)' : '  (cached with 0 turns)'),
+        c.dim('  ' + (issue.reason === 'failed' ? t('(cached parse failure)') : t('(cached with 0 turns)'))),
       )
     }
   }
 
   if (report.claudeRetention) {
     const r = report.claudeRetention
-    const source = r.configured ? 'cleanupPeriodDays' : 'cleanupPeriodDays not set; Claude Code default'
-    const line = `Claude Code deletes transcripts after ${r.effectiveDays} day${r.effectiveDays === 1 ? '' : 's'} (${source}).`
+    const source = r.configured ? 'cleanupPeriodDays' : t('cleanupPeriodDays not set; Claude Code default')
+    const line = tn(
+      'Claude Code deletes transcripts after %s day (%s).',
+      'Claude Code deletes transcripts after %s days (%s).',
+      r.effectiveDays,
+      r.effectiveDays,
+      source,
+    )
     out.push('')
     if (r.effectiveDays < CLAUDE_RETENTION_WARN_DAYS) {
       out.push(
         c.yellow(line) + ' ' +
-        `Daily totals survive in CodeBurn's cache, but per-session detail older than that is gone for good. ` +
-        `To keep it, set "cleanupPeriodDays": 3650 in ${r.settingsPath}.`,
+        t('Daily totals survive in CodeBurn\'s cache, but per-session detail older than that is gone for good. To keep it, set "cleanupPeriodDays": 3650 in %s.', r.settingsPath),
       )
     } else {
-      out.push(c.dim(line + ' Long transcript retention: per-session detail is preserved.'))
+      out.push(c.dim(line + ' ' + t('Long transcript retention: per-session detail is preserved.')))
     }
   }
 
@@ -562,8 +574,8 @@ export function renderDoctorTable(
   const empty = report.providers.filter(r => r.status === 'empty')
   const ok = report.providers.filter(r => r.status === 'ok')
   out.push(
-    c.dim('Bottom line: ') +
-    `${ok.length} OK, ${empty.length} with nothing found, ${broken.length} with errors.`,
+    c.dim(t('Bottom line:') + ' ') +
+    t('%d OK, %d with nothing found, %d with errors.', ok.length, empty.length, broken.length),
   )
 
   return out.join('\n') + '\n'

@@ -12,6 +12,7 @@ import {
   type Payload,
   type Period,
 } from '@/lib/api'
+import { t, tn, tsplit, useLanguage } from '@/lib/i18n'
 import { cn, fmtNum, fmtTokens, usd } from '@/lib/utils'
 import { Card } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -84,7 +85,11 @@ function IndexingNotice({ payload }: { payload?: Payload }) {
   if (!hydration || hydration.complete) return null
   return (
     <div role="status" className="mb-3 border-l-2 border-primary px-2.5 py-1 text-[12px] text-muted-foreground">
-      Indexing history · {Math.min(hydration.indexedFiles, hydration.totalFiles)}/{hydration.totalFiles} files · totals below cover what is indexed so far
+      {t(
+        'Indexing history · %d/%d files · totals below cover what is indexed so far',
+        Math.min(hydration.indexedFiles, hydration.totalFiles),
+        hydration.totalFiles,
+      )}
     </div>
   )
 }
@@ -106,7 +111,7 @@ function DeviceView({ payload, isRemote, unit }: { payload?: Payload; isRemote: 
   // it the row is a single full-width Model efficiency panel, so an older peer
   // (no workflow block) renders exactly as the dashboard did before.
   const workflowPanel = c && hasWorkflowContent(c) ? (
-    <Panel title="Workflow">
+    <Panel title={t('Workflow')}>
       <WorkflowPanel current={c} />
     </Panel>
   ) : null
@@ -118,7 +123,7 @@ function DeviceView({ payload, isRemote, unit }: { payload?: Payload; isRemote: 
         <div className="flex items-end justify-between px-5 pt-4">
           <div>
             <div className="text-xs text-tertiary-foreground">
-              {c ? `${fmtNum(c.calls)} calls · ${fmtNum(c.sessions)} sessions` : ' '}
+              {c ? t('%s calls · %s sessions', fmtNum(c.calls), fmtNum(c.sessions)) : ' '}
             </div>
             <div className="mt-1 font-display text-4xl tracking-tight tabular-nums text-primary">
               {c ? (unit === 'tokens' ? fmtTokens(c.inputTokens + c.outputTokens) : usd(c.cost)) : <Skeleton className="h-10 w-36" />}
@@ -135,18 +140,18 @@ function DeviceView({ payload, isRemote, unit }: { payload?: Payload; isRemote: 
       <div className="mb-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
         {c ? (
           <>
-            <MetricCard label="Cost" value={usd(c.cost)} accent />
+            <MetricCard label={t('Cost')} value={usd(c.cost)} accent />
             <MetricCard
-              label="Tokens"
+              label={t('Tokens')}
               value={fmtTokens(c.inputTokens + c.outputTokens)}
-              sub={`in ${fmtTokens(c.inputTokens)} / out ${fmtTokens(c.outputTokens)}`}
+              sub={t('in %s / out %s', fmtTokens(c.inputTokens), fmtTokens(c.outputTokens))}
             />
-            <MetricCard label="Calls" value={fmtNum(c.calls)} />
-            <MetricCard label="Sessions" value={fmtNum(c.sessions)} />
-            <MetricCard label="Cache hit" value={`${(c.cacheHitPercent || 0).toFixed(1)}%`} />
-            <MetricCard label="Cache write" value={fmtTokens(cacheWrite)} />
-            <MetricCard label="Cache read" value={fmtTokens(cacheRead)} />
-            <MetricCard label="One-shot" value={c.oneShotRate == null ? '—' : `${Math.round(c.oneShotRate * 100)}%`} />
+            <MetricCard label={t('Calls')} value={fmtNum(c.calls)} />
+            <MetricCard label={t('Sessions')} value={fmtNum(c.sessions)} />
+            <MetricCard label={t('Cache hit')} value={`${(c.cacheHitPercent || 0).toFixed(1)}%`} />
+            <MetricCard label={t('Cache write')} value={fmtTokens(cacheWrite)} />
+            <MetricCard label={t('Cache read')} value={fmtTokens(cacheRead)} />
+            <MetricCard label={t('One-shot')} value={c.oneShotRate == null ? '—' : `${Math.round(c.oneShotRate * 100)}%`} />
           </>
         ) : (
           Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} className="h-20" />)
@@ -154,16 +159,16 @@ function DeviceView({ payload, isRemote, unit }: { payload?: Payload; isRemote: 
       </div>
 
       <div className="mb-3 grid gap-3 lg:grid-cols-2">
-        <Panel title="By tool">
+        <Panel title={t('By tool')}>
           <BarList items={toolBars} total={c?.cost} />
         </Panel>
-        <Panel title="Top models">
+        <Panel title={t('Top models')}>
           <DataTable
             columns={[
-              { key: 'name', label: 'Model' },
-              { key: 'cost', label: 'Cost', num: true },
-              { key: 'calls', label: 'Calls', num: true },
-              { key: 'savings', label: 'Savings', num: true },
+              { key: 'name', label: t('Model') },
+              { key: 'cost', label: t('Cost'), num: true },
+              { key: 'calls', label: t('Calls'), num: true },
+              { key: 'savings', label: t('Savings'), num: true },
             ]}
             rows={(c?.topModels ?? []).filter((m) => m.cost > 0).slice(0, 8).map((m) => ({
               name: m.name,
@@ -176,12 +181,12 @@ function DeviceView({ payload, isRemote, unit }: { payload?: Payload; isRemote: 
       </div>
 
       <div className={cn('mb-3 grid gap-3', workflowPanel && 'lg:grid-cols-2')}>
-        <Panel title="Model efficiency">
+        <Panel title={t('Model efficiency')}>
           <DataTable
             columns={[
-              { key: 'name', label: 'Model' },
-              { key: 'costPerEdit', label: 'Cost/edit', num: true },
-              { key: 'oneShot', label: 'One-shot', num: true },
+              { key: 'name', label: t('Model') },
+              { key: 'costPerEdit', label: t('Cost/edit'), num: true },
+              { key: 'oneShot', label: t('One-shot'), num: true },
             ]}
             rows={(c?.modelEfficiency ?? []).slice(0, 10).map((m) => ({
               name: m.name,
@@ -198,25 +203,25 @@ function DeviceView({ payload, isRemote, unit }: { payload?: Payload; isRemote: 
 
       {timeline && (
         <div className="mb-3">
-          <Panel title="Spend punchcard">
+          <Panel title={t('Spend punchcard')}>
             <Punchcard timeline={timeline} />
           </Panel>
         </div>
       )}
 
       <div className="mb-3 grid gap-3 lg:grid-cols-2">
-        <Panel title="Top projects">
+        <Panel title={t('Top projects')}>
           {isRemote ? (
             <p className="py-6 text-center text-sm text-tertiary-foreground">
-              Project and session detail stays on that device. Only totals are shared.
+              {t('Project and session detail stays on that device. Only totals are shared.')}
             </p>
           ) : (
             <DataTable
               columns={[
-                { key: 'name', label: 'Project' },
-                { key: 'cost', label: 'Cost', num: true },
-                { key: 'sessions', label: 'Sessions', num: true },
-                { key: 'avgCost', label: 'Avg/session', num: true },
+                { key: 'name', label: t('Project') },
+                { key: 'cost', label: t('Cost'), num: true },
+                { key: 'sessions', label: t('Sessions'), num: true },
+                { key: 'avgCost', label: t('Avg/session'), num: true },
               ]}
               rows={(c?.topProjects ?? []).slice(0, 10).map((p) => ({
                 name: p.name,
@@ -227,28 +232,28 @@ function DeviceView({ payload, isRemote, unit }: { payload?: Payload; isRemote: 
             />
           )}
         </Panel>
-        <Panel title="By activity">
+        <Panel title={t('By activity')}>
           <BarList items={activityBars} total={c?.cost} />
         </Panel>
       </div>
 
       <div className="mb-3 grid gap-3 lg:grid-cols-2">
-        <Panel title="Subagents">
+        <Panel title={t('Subagents')}>
           <DataTable
             columns={[
-              { key: 'name', label: 'Subagent' },
-              { key: 'calls', label: 'Calls', num: true },
-              { key: 'cost', label: 'Cost', num: true },
+              { key: 'name', label: t('Subagent') },
+              { key: 'calls', label: t('Calls'), num: true },
+              { key: 'cost', label: t('Cost'), num: true },
             ]}
             rows={(c?.subagents ?? []).slice(0, 10).map((s) => ({ name: s.name, calls: fmtNum(s.calls), cost: usd(s.cost) }))}
           />
         </Panel>
-        <Panel title="Skills">
+        <Panel title={t('Skills')}>
           <DataTable
             columns={[
-              { key: 'name', label: 'Skill' },
-              { key: 'turns', label: 'Turns', num: true },
-              { key: 'cost', label: 'Cost', num: true },
+              { key: 'name', label: t('Skill') },
+              { key: 'turns', label: t('Turns'), num: true },
+              { key: 'cost', label: t('Cost'), num: true },
             ]}
             rows={(c?.skills ?? []).slice(0, 10).map((s) => ({ name: s.name, turns: fmtNum(s.turns), cost: usd(s.cost) }))}
           />
@@ -256,24 +261,28 @@ function DeviceView({ payload, isRemote, unit }: { payload?: Payload; isRemote: 
       </div>
 
       <div className="mb-3 grid gap-3 lg:grid-cols-2">
-        <Panel title="MCP servers">
+        <Panel title={t('MCP servers')}>
           <DataTable
             columns={[
-              { key: 'name', label: 'Server' },
-              { key: 'calls', label: 'Calls', num: true },
+              { key: 'name', label: t('Server') },
+              { key: 'calls', label: t('Calls'), num: true },
             ]}
             rows={(c?.mcpServers ?? []).slice(0, 10).map((m) => ({ name: m.name, calls: fmtNum(m.calls) }))}
           />
         </Panel>
-        <Panel title="Savings & waste">
+        <Panel title={t('Savings & waste')}>
           {c ? (
             <div className="flex flex-col gap-3 py-1">
-              <Stat label="Local-model savings" value={usd(c.localModelSavings?.totalUSD)} />
+              <Stat label={t('Local-model savings')} value={usd(c.localModelSavings?.totalUSD)} />
               <Stat
-                label={`Retry tax${c.retryTax?.retries ? ` (${fmtNum(c.retryTax.retries)} retries)` : ''}`}
+                label={
+                  c.retryTax?.retries
+                    ? t('Retry tax (%s retries)', fmtNum(c.retryTax.retries))
+                    : t('Retry tax')
+                }
                 value={usd(c.retryTax?.totalUSD)}
               />
-              <Stat label="Routing waste (potential)" value={usd(c.routingWaste?.totalSavingsUSD)} />
+              <Stat label={t('Routing waste (potential)')} value={usd(c.routingWaste?.totalSavingsUSD)} />
             </div>
           ) : (
             <Skeleton className="h-20" />
@@ -281,11 +290,11 @@ function DeviceView({ payload, isRemote, unit }: { payload?: Payload; isRemote: 
         </Panel>
       </div>
 
-      <Panel title="Tools">
+      <Panel title={t('Tools')}>
         <DataTable
           columns={[
-            { key: 'name', label: 'Tool' },
-            { key: 'calls', label: 'Calls', num: true },
+            { key: 'name', label: t('Tool') },
+            { key: 'calls', label: t('Calls'), num: true },
           ]}
           rows={(c?.tools ?? []).slice(0, 14).map((t) => ({ name: t.name, calls: fmtNum(t.calls) }))}
         />
@@ -355,7 +364,9 @@ function CombinedView({ devices, unit }: { devices: DeviceUsage[]; unit: Unit })
       <Card className="mb-3 overflow-hidden">
         <div className="flex items-end justify-between px-5 pt-4">
           <div>
-            <div className="text-xs text-tertiary-foreground">{`${reachable} device${reachable === 1 ? '' : 's'} · ${fmtNum(total.calls)} calls`}</div>
+            <div className="text-xs text-tertiary-foreground">
+              {tn('%1$s device · %2$s calls', '%1$s devices · %2$s calls', reachable, String(reachable), fmtNum(total.calls))}
+            </div>
             <div className="mt-1 font-display text-4xl tracking-tight tabular-nums text-primary">
               {unit === 'tokens' ? fmtTokens(total.tokens) : usd(total.cost)}
             </div>
@@ -367,27 +378,27 @@ function CombinedView({ devices, unit }: { devices: DeviceUsage[]; unit: Unit })
       </Card>
 
       <div className="mb-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <MetricCard label="Total cost" value={usd(total.cost)} accent />
-        <MetricCard label="Tokens" value={fmtTokens(total.tokens)} sub={`in ${fmtTokens(inTok)} / out ${fmtTokens(outTok)}`} />
-        <MetricCard label="Calls" value={fmtNum(total.calls)} />
-        <MetricCard label="Sessions" value={fmtNum(total.sessions)} />
-        <MetricCard label="Cache write" value={fmtTokens(cacheWrite)} />
-        <MetricCard label="Cache read" value={fmtTokens(cacheRead)} />
-        <MetricCard label="Devices" value={String(reachable)} />
+        <MetricCard label={t('Total cost')} value={usd(total.cost)} accent />
+        <MetricCard label={t('Tokens')} value={fmtTokens(total.tokens)} sub={t('in %s / out %s', fmtTokens(inTok), fmtTokens(outTok))} />
+        <MetricCard label={t('Calls')} value={fmtNum(total.calls)} />
+        <MetricCard label={t('Sessions')} value={fmtNum(total.sessions)} />
+        <MetricCard label={t('Cache write')} value={fmtTokens(cacheWrite)} />
+        <MetricCard label={t('Cache read')} value={fmtTokens(cacheRead)} />
+        <MetricCard label={t('Devices')} value={String(reachable)} />
       </div>
 
-      <Panel title="By device">
+      <Panel title={t('By device')}>
         <DataTable
           columns={[
-            { key: 'device', label: 'Device' },
-            { key: 'cost', label: 'Cost', num: true },
-            { key: 'tokens', label: 'Tokens', num: true },
-            { key: 'calls', label: 'Calls', num: true },
-            { key: 'sessions', label: 'Sessions', num: true },
+            { key: 'device', label: t('Device') },
+            { key: 'cost', label: t('Cost'), num: true },
+            { key: 'tokens', label: t('Tokens'), num: true },
+            { key: 'calls', label: t('Calls'), num: true },
+            { key: 'sessions', label: t('Sessions'), num: true },
           ]}
           rows={rows.map((r) => ({
-            device: r.name + (r.local ? ' · this Mac' : ''),
-            cost: r.error ? <span className="text-tertiary-foreground">unreachable</span> : usd(r.cost),
+            device: r.local ? t('%s · this Mac', r.name) : r.name,
+            cost: r.error ? <span className="text-tertiary-foreground">{t('unreachable')}</span> : usd(r.cost),
             tokens: r.error ? '—' : fmtTokens(r.tokens),
             calls: r.error ? '—' : fmtNum(r.calls),
             sessions: r.error ? '—' : fmtNum(r.sessions),
@@ -396,16 +407,16 @@ function CombinedView({ devices, unit }: { devices: DeviceUsage[]; unit: Unit })
       </Panel>
 
       <div className="mt-3 grid gap-3 lg:grid-cols-2">
-        <Panel title="By task (all devices)">
+        <Panel title={t('By task (all devices)')}>
           <BarList items={taskBars} total={total.cost} />
         </Panel>
-        <Panel title="By tool (all devices)">
+        <Panel title={t('By tool (all devices)')}>
           <BarList items={toolBars} total={total.cost} />
         </Panel>
       </div>
 
       <div className="mt-3">
-        <Panel title="Top models (all devices)">
+        <Panel title={t('Top models (all devices)')}>
           <BarList items={modelBars} total={total.cost} />
         </Panel>
       </div>
@@ -431,8 +442,8 @@ function ThemeToggle() {
     <button
       type="button"
       onClick={toggle}
-      aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'}
-      title={dark ? 'Switch to light mode' : 'Switch to dark mode'}
+      aria-label={dark ? t('Switch to light mode') : t('Switch to dark mode')}
+      title={dark ? t('Switch to light mode') : t('Switch to dark mode')}
       className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border bg-card text-tertiary-foreground transition-colors hover:bg-interactive-secondary hover:text-foreground max-md:h-9 max-md:w-9 max-md:shrink-0"
     >
       {dark ? (
@@ -450,6 +461,7 @@ function ThemeToggle() {
 }
 
 export function App() {
+  const lang = useLanguage()
   const [page, setPage] = useState<'usage' | 'context'>('usage')
   const [period, setPeriod] = useState<Period>('today')
   const [provider, setProvider] = useState('all')
@@ -499,6 +511,9 @@ export function App() {
     void refetch()
   }
   const pending = (shareInfo?.pending ?? []).filter((p) => !responded.has(p.id))
+  // The code must render monospaced, so the sentence is split around its
+  // placeholder rather than cut into two separately translated halves.
+  const [codeBefore, codeAfter] = tsplit('Confirm this code matches on that device: %s')
 
   // Only show devices we could actually reach; an unreachable paired device is
   // hidden entirely rather than shown as an error row.
@@ -562,8 +577,20 @@ export function App() {
     return () => mql.removeEventListener('change', apply)
   }, [])
 
+  // The tab title is chrome too, and index.html ships the English one.
+  useEffect(() => {
+    document.title = t('CodeBurn - Local Dashboard')
+    document.documentElement.lang = lang
+  }, [lang])
+
   const showCombined = multi && view === 'all'
-  const viewTitle = showCombined ? 'All devices' : (primary ? primary.name + (primary.local ? ' · this Mac' : '') : 'Loading…')
+  const viewTitle = showCombined
+    ? t('All devices')
+    : primary
+      ? primary.local
+        ? t('%s · this Mac', primary.name)
+        : primary.name
+      : t('Loading…')
   const label = local?.payload?.current?.label ?? ''
 
   return (
@@ -573,7 +600,7 @@ export function App() {
           <button
             type="button"
             onClick={() => setSidebarOpen(true)}
-            aria-label="Open menu"
+            aria-label={t('Open menu')}
             aria-expanded={sidebarOpen}
             aria-controls="dashboard-sidebar"
             className="-ml-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-foreground transition-colors hover:bg-interactive-secondary md:hidden"
@@ -587,7 +614,7 @@ export function App() {
             <span className="text-lg font-semibold tracking-[-0.02em] text-foreground">
               Code<span className="text-brand">Burn</span>
             </span>
-            <span className="ml-1 text-[11px] font-light uppercase tracking-[0.14em] text-tertiary-foreground max-sm:hidden">usage</span>
+            <span className="ml-1 text-[11px] font-light uppercase tracking-[0.14em] text-tertiary-foreground max-sm:hidden">{t('usage')}</span>
           </div>
 
           <div className="ml-6 flex rounded-md border border-border bg-interactive-secondary p-0.5 max-md:ml-2 max-md:shrink-0">
@@ -601,7 +628,7 @@ export function App() {
                   page === pg ? 'bg-active-primary text-foreground shadow-sm' : 'text-tertiary-foreground hover:text-foreground',
                 )}
               >
-                {pg === 'usage' ? 'Usage' : 'Context'}
+                {pg === 'usage' ? t('Usage') : t('Context')}
               </button>
             ))}
           </div>
@@ -620,7 +647,7 @@ export function App() {
                     period === p.key ? 'bg-active-primary text-foreground shadow-sm' : 'text-tertiary-foreground hover:text-foreground',
                   )}
                 >
-                  {p.label}
+                  {t(p.label)}
                 </button>
               ))}
             </div>
@@ -635,7 +662,7 @@ export function App() {
                     unit === u ? 'bg-active-primary text-foreground shadow-sm' : 'text-tertiary-foreground hover:text-foreground',
                   )}
                 >
-                  {u === 'cost' ? 'Cost' : 'Tokens'}
+                  {u === 'cost' ? t('Cost') : t('Tokens')}
                 </button>
               ))}
             </div>
@@ -644,7 +671,7 @@ export function App() {
               onChange={(e) => setProvider(e.target.value)}
               className="rounded-md border border-border bg-card px-3 py-1.5 text-xs text-foreground outline-none max-md:min-h-9 max-md:shrink-0"
             >
-              <option value="all">All tools</option>
+              <option value="all">{t('All tools')}</option>
               {providerOptions.map((p) => (
                 <option key={p} value={p}>
                   {p}
@@ -661,7 +688,7 @@ export function App() {
           {sidebarOpen && (
             <button
               type="button"
-              aria-label="Close menu"
+              aria-label={t('Close menu')}
               onClick={() => setSidebarOpen(false)}
               className="fixed inset-0 z-30 bg-black/40 md:hidden"
             />
@@ -678,7 +705,7 @@ export function App() {
           >
             <button
               type="button"
-              aria-label="Close menu"
+              aria-label={t('Close menu')}
               onClick={() => setSidebarOpen(false)}
               className="absolute right-3 top-3 flex h-9 w-9 items-center justify-center rounded-md text-tertiary-foreground transition-colors hover:bg-interactive-secondary hover:text-foreground md:hidden"
             >
@@ -689,10 +716,10 @@ export function App() {
             {page === 'usage' && (
             <>
             <div className="flex flex-col gap-1">
-              <p className="mb-1 px-2.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-heading">Devices</p>
+              <p className="mb-1 px-2.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-heading">{t('Devices')}</p>
               {multi && (
                 <SideLink active={view === 'all'} onClick={() => { setView('all'); setSidebarOpen(false) }}>
-                  All devices
+                  {t('All devices')}
                 </SideLink>
               )}
               {devices.map((d) => (
@@ -701,11 +728,10 @@ export function App() {
                   active={view === d.id || (!multi && view === 'all' && d.local)}
                   onClick={() => { setView(d.id); setSidebarOpen(false) }}
                 >
-                  {d.name}
-                  {d.local ? ' · this Mac' : ''}
+                  {d.local ? t('%s · this Mac', d.name) : d.name}
                 </SideLink>
               ))}
-              {devices.length === 0 && <p className="px-2.5 py-1 text-xs text-tertiary-foreground">Loading…</p>}
+              {devices.length === 0 && <p className="px-2.5 py-1 text-xs text-tertiary-foreground">{t('Loading…')}</p>}
             </div>
 
             <button
@@ -717,25 +743,25 @@ export function App() {
                 <circle cx="7" cy="7" r="4.5" />
                 <path d="M10.5 10.5L14 14" />
               </svg>
-              Search local devices
+              {t('Search local devices')}
             </button>
             </>
             )}
 
             <div className="border-t border-border pt-4">
-              <p className="mb-2 px-2.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-heading">Share</p>
+              <p className="mb-2 px-2.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-heading">{t('Share')}</p>
               <button
                 type="button"
                 onClick={() => void toggleShare()}
                 className="flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-[13.5px] text-foreground transition-colors hover:bg-interactive-secondary max-md:min-h-9"
               >
-                <span>Share this device</span>
+                <span>{t('Share this device')}</span>
                 <Switch on={!!shareInfo?.sharing} />
               </button>
               {shareInfo?.sharing && (
                 <div className="mt-1.5 px-2.5">
                   <p className="text-[11px] leading-relaxed text-tertiary-foreground">
-                    Discoverable as &ldquo;{shareInfo.name}&rdquo; · {shareInfo.peers} paired
+                    {t('Discoverable as “%s” · %d paired', shareInfo.name, shareInfo.peers)}
                   </p>
                   <label className="mt-2 flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
                     <input
@@ -744,7 +770,7 @@ export function App() {
                       onChange={() => void toggleAlways()}
                       className="h-3.5 w-3.5 accent-primary"
                     />
-                    Keep sharing always
+                    {t('Keep sharing always')}
                   </label>
                 </div>
               )}
@@ -752,7 +778,7 @@ export function App() {
 
             <div className="mt-auto border-t border-border pt-4">
               <p className="text-[11px] leading-relaxed text-tertiary-foreground">
-                Local only. Nothing leaves your machine; only totals are shared between your devices.
+                {t('Local only. Nothing leaves your machine; only totals are shared between your devices.')}
               </p>
               <div className="mt-3 flex items-center gap-1">
                 <a
@@ -796,7 +822,7 @@ export function App() {
 
           <main className="min-w-0 flex-1 overflow-y-auto pr-0.5">
             <div className="mb-3 flex items-baseline justify-between">
-              <h1 className="font-display text-xl tracking-tight text-foreground">{page === 'context' ? 'Context' : viewTitle}</h1>
+              <h1 className="font-display text-xl tracking-tight text-foreground">{page === 'context' ? t('Context') : viewTitle}</h1>
               <span className="text-xs text-tertiary-foreground">{page === 'usage' ? label : ''}</span>
             </div>
 
@@ -811,7 +837,7 @@ export function App() {
             )}
 
             {page === 'usage' && isError && (
-              <div className="mt-4 text-sm text-tertiary-foreground">Failed to load: {String((error as Error)?.message)}</div>
+              <div className="mt-4 text-sm text-tertiary-foreground">{t('Failed to load: %s', String((error as Error)?.message))}</div>
             )}
           </main>
         </div>
@@ -823,16 +849,18 @@ export function App() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
           <div className="w-full max-w-sm overflow-hidden rounded-lg border border-border bg-card shadow-[0_24px_60px_-20px_rgba(0,0,0,0.35)]">
             <div className="border-b border-border px-5 py-3.5">
-              <h2 className="text-sm font-semibold text-foreground">Incoming pairing request</h2>
+              <h2 className="text-sm font-semibold text-foreground">{t('Incoming pairing request')}</h2>
             </div>
             <div className="flex flex-col gap-3 px-5 py-4">
               {pending.map((p) => (
                 <div key={p.id} className="rounded-md border border-border px-3.5 py-3">
                   <p className="text-sm text-foreground">
-                    &ldquo;{p.name}&rdquo; wants to pair with this device.
+                    {t('“%s” wants to pair with this device.', p.name)}
                   </p>
                   <p className="mt-1 text-xs text-tertiary-foreground">
-                    Confirm this code matches on that device: <span className="font-mono text-foreground">{p.code}</span>
+                    {codeBefore}
+                    <span className="font-mono text-foreground">{p.code}</span>
+                    {codeAfter}
                   </p>
                   <div className="mt-3 flex gap-2">
                     <button
@@ -840,14 +868,14 @@ export function App() {
                       onClick={() => void respondPairing(p.id, true)}
                       className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90"
                     >
-                      Approve
+                      {t('Approve')}
                     </button>
                     <button
                       type="button"
                       onClick={() => void respondPairing(p.id, false)}
                       className="rounded-md border border-border px-3 py-1.5 text-xs text-tertiary-foreground transition-colors hover:text-foreground"
                     >
-                      Deny
+                      {t('Deny')}
                     </button>
                   </div>
                 </div>

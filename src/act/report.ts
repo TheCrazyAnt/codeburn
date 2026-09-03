@@ -26,6 +26,7 @@ import { undoAction } from './undo.js'
 import { renderTable } from '../text-table.js'
 import { formatTokens } from '../format.js'
 import { formatCost } from '../currency.js'
+import { t, tn } from '../i18n.js'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const WINDOW_CAP_DAYS = 30
@@ -36,12 +37,17 @@ const VOLUME_SHIFT_FACTOR = 2
 // Encode the epic's honest-accounting rules where they are seen: estimates are
 // window-scaled so both columns share a scale, each kind measures only its own
 // metric, guard is correlation, and realized figures are rounded down.
-const HONEST_FOOTER =
-  'Estimates are scaled to the measured window for comparability; the at-apply estimate is kept in --json. '
-  + 'MCP and archive realized figures are derived from per-session baselines times session counts, not independently measured. '
-  + 'Each fix measures only its own metric; effects are never attributed across signals. '
-  + 'Guard rows are correlation, not attribution. Realized numbers are rounded down. '
-  + 'Deferral rows exclude servers an MCP remove/scope row already measures.'
+// Translated on call, not at module load: the active language is resolved
+// after this module is imported.
+function honestFooter(): string {
+  return t(
+    'Estimates are scaled to the measured window for comparability; the at-apply estimate is kept in --json. '
+    + 'MCP and archive realized figures are derived from per-session baselines times session counts, not independently measured. '
+    + 'Each fix measures only its own metric; effects are never attributed across signals. '
+    + 'Guard rows are correlation, not attribution. Realized numbers are rounded down. '
+    + 'Deferral rows exclude servers an MCP remove/scope row already measures.',
+  )
+}
 
 const MCP_KINDS = new Set<ActionKind>(['mcp-remove', 'mcp-project-scope'])
 // defer-* re-enable native MCP tool deferral (part 2 of #614): the same
@@ -242,8 +248,8 @@ function mcpRow(
 ): ActReportRow {
   const servers = Object.keys(baseline.metrics)
   const perSessionTokens = Object.values(baseline.metrics).reduce((a, b) => a + b, 0)
-  if (servers.length === 0 || perSessionTokens === 0) return { ...base, note: 'not measurable: empty baseline' }
-  if (sessions.length === 0) return { ...base, note: 'not measurable: no sessions in the window yet' }
+  if (servers.length === 0 || perSessionTokens === 0) return { ...base, note: t('not measurable: empty baseline') }
+  if (sessions.length === 0) return { ...base, note: t('not measurable: no sessions in the window yet') }
   // Window-scaled estimate: what the fix would save if every window session
   // benefited. Realized differs from it only through still-loading sessions
   // (and the revert check), so the pair is derived from session counts, not
@@ -257,7 +263,13 @@ function mcpRow(
       estimatedForWindow,
       status: 'reverted',
       confidence,
-      note: `reverted by user: ${servers.join(', ')} loaded again in ${stillLoading} post-apply session${stillLoading === 1 ? '' : 's'}`,
+      note: tn(
+        'reverted by user: %s loaded again in %d post-apply session',
+        'reverted by user: %s loaded again in %d post-apply sessions',
+        stillLoading,
+        servers.join(', '),
+        stillLoading,
+      ),
     }
   }
   const savedSessions = Math.max(0, sessions.length - stillLoading)
@@ -278,11 +290,11 @@ function deferRow(
     return {
       ...base,
       note: excludedServers > 0
-        ? 'not measurable: every server in this baseline is already measured by an MCP remove/scope row'
-        : 'not measurable: empty baseline',
+        ? t('not measurable: every server in this baseline is already measured by an MCP remove/scope row')
+        : t('not measurable: empty baseline'),
     }
   }
-  if (sessions.length === 0) return { ...base, note: 'not measurable: no sessions in the window yet' }
+  if (sessions.length === 0) return { ...base, note: t('not measurable: no sessions in the window yet') }
   const estimatedForWindow = Math.floor(perSessionTokens * sessions.length)
   // A post-apply session realized the saving only if deferral actually became
   // active in it. ENABLE_TOOL_SEARCH is read at process start, so sessions
@@ -297,7 +309,11 @@ function deferRow(
       estimatedForWindow,
       status: 'pending',
       confidence,
-      note: `not yet in effect: deferral is still inactive in ${sessions.length} post-apply session${sessions.length === 1 ? '' : 's'} (takes effect on the next session; the client may not have restarted, or the change was reverted)`,
+      note: tn(
+        'not yet in effect: deferral is still inactive in %d post-apply session (takes effect on the next session; the client may not have restarted, or the change was reverted)',
+        'not yet in effect: deferral is still inactive in %d post-apply sessions (takes effect on the next session; the client may not have restarted, or the change was reverted)',
+        sessions.length,
+      ),
     }
   }
   return { ...base, estimatedForWindow, status: 'measured', realizedTokens: Math.floor(perSessionTokens * deferredSessions), confidence }
@@ -308,13 +324,13 @@ function archiveRow(
   baseline: ActionBaseline, afterStart: Date, now: Date,
 ): ActReportRow {
   const perSessionTokens = Object.values(baseline.metrics).reduce((a, b) => a + b, 0)
-  if (perSessionTokens === 0) return { ...base, note: 'not measurable: empty baseline' }
-  if (sessions.length === 0) return { ...base, note: 'not measurable: no sessions in the window yet' }
+  if (perSessionTokens === 0) return { ...base, note: t('not measurable: empty baseline') }
+  if (sessions.length === 0) return { ...base, note: t('not measurable: no sessions in the window yet') }
   const estimatedForWindow = Math.floor(perSessionTokens * sessions.length)
   const confidence = confidenceFor(sessions.length, baseline, afterStart, now)
   const restored = rec.changes.some(c => c.op === 'move' && existsSync(c.path))
   if (restored) {
-    return { ...base, estimatedForWindow, status: 'reverted', confidence, note: 'reverted by user: an archived item was moved back into place' }
+    return { ...base, estimatedForWindow, status: 'reverted', confidence, note: t('reverted by user: an archived item was moved back into place') }
   }
   // Estimate and realized are the same product by construction; the measured
   // signal here is the session count and the revert check, not the multiply.
@@ -329,7 +345,7 @@ function readEditRow(
   const readsNow = countToolCalls(sessions, READ_TOOL_NAMES)
   const editsThen = baseline.metrics['edits'] ?? 0
   const readsThen = baseline.metrics['reads'] ?? 0
-  if (editsThen <= 0 || editsNow <= 0) return { ...base, note: 'not measurable: not enough edit activity to compare' }
+  if (editsThen <= 0 || editsNow <= 0) return { ...base, note: t('not measurable: not enough edit activity to compare') }
   const ratioThen = readsThen / editsThen
   const ratioNow = readsNow / editsNow
   // Detector estimate math: reads short of HEALTHY_READ_EDIT_RATIO per edit are
@@ -346,7 +362,7 @@ function readEditRow(
     status: 'measured',
     realizedTokens: realized,
     confidence: confidenceFor(sessions.length, baseline, afterStart, now),
-    note: `read:edit ${ratioThen.toFixed(1)}:1 -> ${ratioNow.toFixed(1)}:1`,
+    note: t('read:edit %s:1 -> %s:1', ratioThen.toFixed(1), ratioNow.toFixed(1)),
   }
 }
 
@@ -357,14 +373,14 @@ async function guardRow(
   const abandonedThen = baseline.metrics['abandonedPct']
   const avgThen = baseline.metrics['avgSessionCostUSD']
   if (abandonedThen === undefined || avgThen === undefined) {
-    return { ...base, note: 'not measurable: no yield baseline captured at install time' }
+    return { ...base, note: t('not measurable: no yield baseline captured at install time') }
   }
   const yieldFn = opts.computeYield ?? ((range: DateRange) => computeYield(range, opts.cwd ?? process.cwd()))
   let summary: YieldSummary
   try {
     summary = await yieldFn({ start: afterStart, end: now })
   } catch {
-    return { ...base, note: 'not measurable: yield could not be computed for the post-apply window' }
+    return { ...base, note: t('not measurable: yield could not be computed for the post-apply window') }
   }
   const abandonedNow = summary.total.cost > 0 ? Math.round((summary.abandoned.cost / summary.total.cost) * 100) : 0
   const avgNow = summary.total.sessions > 0 ? summary.total.cost / summary.total.sessions : 0
@@ -372,7 +388,7 @@ async function guardRow(
     ...base,
     status: 'measured',
     confidence: summary.total.sessions < MIN_POST_WINDOW_SESSIONS ? 'low' : 'normal',
-    note: 'correlation, not attribution',
+    note: t('correlation, not attribution'),
     correlation: {
       abandonedPctThen: abandonedThen,
       abandonedPctNow: abandonedNow,
@@ -387,13 +403,13 @@ async function modelDefaultRow(
   baseline: ActionBaseline, afterStart: Date, now: Date, projectFound: boolean,
 ): Promise<ActReportRow> {
   if (!projectFound) {
-    return { ...base, note: 'not measurable: project not found in current data (path may have changed)' }
+    return { ...base, note: t('not measurable: project not found in current data (path may have changed)') }
   }
   const models = Object.keys(baseline.metrics)
-  if (models.length < 2) return { ...base, note: 'not measurable: invalid baseline' }
+  if (models.length < 2) return { ...base, note: t('not measurable: invalid baseline') }
   const candidateModel = baseline.candidateModel ?? models[0]!
   const preApplyRate = baseline.metrics[candidateModel]
-  if (preApplyRate === undefined) return { ...base, note: 'not measurable: invalid baseline' }
+  if (preApplyRate === undefined) return { ...base, note: t('not measurable: invalid baseline') }
   
   const mockProject: ProjectSummary = {
     project: 'mock',
@@ -409,7 +425,7 @@ async function modelDefaultRow(
   const stats = aggregateModelStats([mockProject]).find(s => s.model === candidateModel)
   
   if (!stats || stats.editTurns < 20) {
-    return { ...base, note: `not measurable: < 20 edit turns for ${candidateModel} since apply` }
+    return { ...base, note: t('not measurable: < 20 edit turns for %s since apply', candidateModel) }
   }
   
   const postApplyRate = stats.oneShotTurns / stats.editTurns
@@ -420,7 +436,11 @@ async function modelDefaultRow(
       status: 'measured',
       realizedTokens: 0,
       confidence: 'low',
-      note: `quality regression, consider undo: one-shot rate ${(preApplyRate * 100).toFixed(1)}% -> ${(postApplyRate * 100).toFixed(1)}%`
+      note: t(
+        'quality regression, consider undo: one-shot rate %s%% -> %s%%',
+        (preApplyRate * 100).toFixed(1),
+        (postApplyRate * 100).toFixed(1),
+      )
     }
   }
 
@@ -429,7 +449,11 @@ async function modelDefaultRow(
     status: 'measured',
     realizedTokens: 0,
     confidence: confidenceFor(sessions.length, baseline, afterStart, now),
-    note: `correlation, not attribution: one-shot rate ${(preApplyRate * 100).toFixed(1)}% -> ${(postApplyRate * 100).toFixed(1)}%`
+    note: t(
+      'correlation, not attribution: one-shot rate %s%% -> %s%%',
+      (preApplyRate * 100).toFixed(1),
+      (postApplyRate * 100).toFixed(1),
+    )
   }
 }
 
@@ -452,16 +476,16 @@ async function computeRow(
     note: '',
   }
   const baseline = rec.baseline
-  if (!baseline) return { ...base, note: 'not measurable: no baseline captured at apply time' }
+  if (!baseline) return { ...base, note: t('not measurable: no baseline captured at apply time') }
 
   if (MCP_KINDS.has(rec.kind)) return mcpRow(base, rec, sessions, baseline, afterStart, now)
   if (DEFER_KINDS.has(rec.kind)) return deferRow(base, sessions, baseline, afterStart, now, mcpClaimedServers)
   if (rec.kind in ARCHIVE_DEF_TOKENS) return archiveRow(base, rec, sessions, baseline, afterStart, now)
   if (rec.kind === 'claude-md-rule') return readEditRow(base, sessions, baseline, afterStart, now)
-  if (rec.kind === 'shell-config') return { ...base, note: 'not measurable: bash result token sizes are not retained in the summary' }
+  if (rec.kind === 'shell-config') return { ...base, note: t('not measurable: bash result token sizes are not retained in the summary') }
   if (rec.kind === 'guard-install') return guardRow(base, afterStart, now, baseline, opts)
   if (rec.kind === 'model-default') return modelDefaultRow(base, rec, sessions, baseline, afterStart, now, modelDefaultProjectFound)
-  return { ...base, note: 'not measurable: kind is not tracked by act report' }
+  return { ...base, note: t('not measurable: kind is not tracked by act report') }
 }
 
 // ---------------------------------------------------------------------------
@@ -518,15 +542,15 @@ export async function autoRevertNoEffect(
     if (fix.verdict !== 'no-effect') continue
     const label = fix.findingId ?? fix.kind
     if (fix.kind === 'claude-md-rule') {
-      lines.push(`Not auto-reverted: ${label} edits a CLAUDE.md. Revert: ${fix.undoCommand}`)
+      lines.push(t('Not auto-reverted: %s edits a CLAUDE.md. Revert: %s', label, fix.undoCommand))
       continue
     }
     try {
       const record = await undoAction({ id: fix.id }, { actionsDir: opts.actionsDir })
       revertedIds.add(fix.id)
-      lines.push(`Reverted ${shortId(record.id)}: ${record.description}`)
+      lines.push(t('Reverted %s: %s', shortId(record.id), record.description))
     } catch (err) {
-      lines.push(`Could not revert ${label}: ${err instanceof Error ? err.message : String(err)}`)
+      lines.push(t('Could not revert %s: %s', label, err instanceof Error ? err.message : String(err)))
     }
   }
   return { lines, revertedIds }
@@ -629,29 +653,43 @@ export function buildOptimizeAppliedHeader(report: ActReport): string | null {
     confident.reduce((mx, r) => Math.max(mx, Math.ceil(ageDays(r.appliedAt, generated))), 0),
   )
   const cost = report.costRate > 0 ? ` (~${formatCost(tokens * report.costRate)})` : ''
-  return `Applied fixes: ${report.activeCount} active, realized ~${formatTokens(tokens)} tokens${cost} over ${days} day${days === 1 ? '' : 's'}. Details: codeburn act report`
+  return tn(
+    'Applied fixes: %d active, realized ~%s tokens%s over %d day. Details: codeburn act report',
+    'Applied fixes: %d active, realized ~%s tokens%s over %d days. Details: codeburn act report',
+    days,
+    report.activeCount,
+    formatTokens(tokens),
+    cost,
+    days,
+  )
 }
 
 function realizedCell(r: ActReportRow): string {
-  if (r.status === 'reverted') return 'reverted'
-  if (r.status === 'pending') return 'not yet in effect'
-  if (r.status === 'not-measurable') return 'not measurable'
-  if (r.correlation) return `abandoned ${r.correlation.abandonedPctThen}% -> ${r.correlation.abandonedPctNow}% (corr.)`
-  if (r.kind === 'model-default') return 'correlation'
+  if (r.status === 'reverted') return t('reverted')
+  if (r.status === 'pending') return t('not yet in effect')
+  if (r.status === 'not-measurable') return t('not measurable')
+  if (r.correlation) return t('abandoned %d%% -> %d%% (corr.)', r.correlation.abandonedPctThen, r.correlation.abandonedPctNow)
+  if (r.kind === 'model-default') return t('correlation')
   return formatTokens(r.realizedTokens)
 }
 
 function malformedNote(n: number): string {
-  return `${n} malformed record${n === 1 ? '' : 's'} skipped`
+  return tn('%d malformed record skipped', '%d malformed records skipped', n)
 }
 
 export function renderActReport(report: ActReport): string {
   if (report.rows.length === 0) {
-    const lines = ['', '  No applied actions to measure yet.']
+    const lines = ['', '  ' + t('No applied actions to measure yet.')]
     if (report.activeCount > 0) {
-      lines.push(`  ${report.activeCount} action${report.activeCount === 1 ? '' : 's'} applied; measurement starts after ${REPORT_MIN_AGE_DAYS} days.`)
+      lines.push('  ' + tn(
+        '%d action applied; measurement starts after %d days.',
+        '%d actions applied; measurement starts after %d days.',
+        report.activeCount,
+        report.activeCount,
+        REPORT_MIN_AGE_DAYS,
+      ))
     } else {
-      lines.push('  Apply fixes with codeburn optimize --apply, then check back after a few days.')
+      lines.push('  ' + t('Apply fixes with codeburn optimize --apply, then check back after a few days.'))
     }
     if (report.malformedRecords > 0) lines.push(`  ${malformedNote(report.malformedRecords)}.`)
     lines.push('')
@@ -663,13 +701,13 @@ export function renderActReport(report: ActReport): string {
     r.description,
     r.estimatedForWindow > 0 ? formatTokens(r.estimatedForWindow) : '-',
     realizedCell(r),
-    r.status === 'measured' && isTokenKind(r.kind) ? r.confidence : '-',
+    r.status === 'measured' && isTokenKind(r.kind) ? (r.confidence === 'low' ? t('low') : t('normal')) : '-',
   ])
   const totalCost = report.costRate > 0 ? ` (~${formatCost(report.totalRealizedCostUSD)})` : ''
-  rows.push(['', 'Total realized', '', `${formatTokens(report.totalRealizedTokens)}${totalCost}`, ''])
+  rows.push(['', t('Total realized'), '', `${formatTokens(report.totalRealizedTokens)}${totalCost}`, ''])
 
   const table = renderTable(
-    [{ header: 'Applied' }, { header: 'Action' }, { header: 'Estimated', right: true }, { header: 'Realized', right: true }, { header: 'Confidence' }],
+    [{ header: t('Applied') }, { header: t('Action') }, { header: t('Estimated'), right: true }, { header: t('Realized'), right: true }, { header: t('Confidence') }],
     rows,
     { boldRows: new Set([rows.length - 1]) },
   )
@@ -679,12 +717,16 @@ export function renderActReport(report: ActReport): string {
     if (r.status === 'measured' && isTokenKind(r.kind)) continue
     if (r.note) details.push(`  ${r.date} ${r.kind}: ${r.note}`)
     if (r.correlation) {
-      details.push(`     avg session cost ${formatCost(r.correlation.avgSessionCostThenUSD)} -> ${formatCost(r.correlation.avgSessionCostNowUSD)}`)
+      details.push('     ' + t(
+        'avg session cost %s -> %s',
+        formatCost(r.correlation.avgSessionCostThenUSD),
+        formatCost(r.correlation.avgSessionCostNowUSD),
+      ))
     }
   }
   if (report.malformedRecords > 0) details.push(`  ${malformedNote(report.malformedRecords)}`)
 
-  return ['', table, ...(details.length > 0 ? ['', ...details] : []), '', '  ' + HONEST_FOOTER, ''].join('\n')
+  return ['', table, ...(details.length > 0 ? ['', ...details] : []), '', '  ' + honestFooter(), ''].join('\n')
 }
 
 export function buildActReportJson(report: ActReport): unknown {
@@ -716,7 +758,7 @@ export function buildActReportJson(report: ActReport): unknown {
       observedDays: report.observedDays,
     },
     appliedFixes: report.appliedFixes,
-    footer: HONEST_FOOTER,
+    footer: honestFooter(),
   }
 }
 

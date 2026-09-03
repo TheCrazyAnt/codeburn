@@ -8,8 +8,8 @@ import { allProviderNames, getAllProviders } from './providers/index.js'
 import { getProvider } from './providers/index.js'
 import { getClaudeConfigDirs, getDesktopSessionsDirs } from './providers/claude.js'
 import { convertCost, formatCost } from './currency.js'
-import { SUPPORTED_LANGUAGES, getLanguage, isLanguage, resolveLanguage, setLanguage, t } from './i18n.js'
-import { renderStatusBar } from './format.js'
+import { SUPPORTED_LANGUAGES, getLanguage, isLanguage, resolveLanguage, setLanguage, t, tn } from './i18n.js'
+import { periodLabelForDisplay, renderStatusBar } from './format.js'
 import { DAILY_CACHE_VERSION, toDateString } from './daily-cache.js'
 import { dateKey } from './day-aggregator.js'
 import { sessionModelBillableOutputTokens } from './session-output.js'
@@ -85,7 +85,7 @@ function parseInteger(value: string): number {
 function parseCodexTpsLimit(value: string): number {
   const parsed = Number(value)
   if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 1 || parsed > 10000) {
-    throw new Error('limit must be an integer from 1 to 10000')
+    throw new Error(t('limit must be an integer from 1 to 10000'))
   }
   return parsed
 }
@@ -93,7 +93,7 @@ function parseCodexTpsLimit(value: string): number {
 function parseCodexTpsWatch(value: string): number {
   const parsed = Number(value)
   if (!Number.isFinite(parsed) || parsed < 0 || (parsed > 0 && parsed < 1) || parsed > 3600) {
-    throw new Error('watch must be 0 or at least 1 second (up to 3600 seconds)')
+    throw new Error(t('watch must be 0 or at least 1 second (up to 3600 seconds)'))
   }
   return parsed
 }
@@ -133,13 +133,13 @@ function toPriceOverrideRows(overrides: Map<string, PriceOverrideConfig>): Price
 function invalidUsdPerMillionRate(option: string, value: number | undefined): string | null {
   if (value === undefined) return null
   if (Number.isFinite(value) && value >= 0) return null
-  return `Invalid ${option}: expected a finite number >= 0 (USD per 1,000,000 tokens).`
+  return t('Invalid %s: expected a finite number >= 0 (USD per 1,000,000 tokens).', option)
 }
 
 function formatPriceOverrideParts(rates: PriceOverrideConfig): string {
-  const parts = [`input ${rates.input}`, `output ${rates.output}`]
-  if (typeof rates.cacheRead === 'number') parts.push(`cache read ${rates.cacheRead}`)
-  if (typeof rates.cacheCreation === 'number') parts.push(`cache creation ${rates.cacheCreation}`)
+  const parts = [t('input %s', rates.input), t('output %s', rates.output)]
+  if (typeof rates.cacheRead === 'number') parts.push(t('cache read %s', rates.cacheRead))
+  if (typeof rates.cacheCreation === 'number') parts.push(t('cache creation %s', rates.cacheCreation))
   return parts.join(', ')
 }
 
@@ -330,17 +330,17 @@ function isOverviewBudgetFilterActive(opts: { provider: string; project: string[
 function printBudgetList(budget: CodeburnConfig['budget']): void {
   const entries = configuredBudgetEntries(budget)
   if (entries.length === 0) {
-    console.log('\n  No budgets configured.')
-    console.log(`  Config: ${getConfigFilePath()}`)
-    console.log('  Add one with: codeburn budget --monthly <amount>\n')
+    console.log(`\n  ${t('No budgets configured.')}`)
+    console.log(`  ${t('Config: %s', getConfigFilePath())}`)
+    console.log(`  ${t('Add one with: codeburn budget --monthly <amount>')}\n`)
     return
   }
 
-  console.log('\n  Budgets:')
+  console.log(`\n  ${t('Budgets:')}`)
   for (const entry of entries) {
     console.log(`    ${entry.tier}: ${formatDisplayCurrencyAmount(entry.amount)}`)
   }
-  console.log(`  Config: ${getConfigFilePath()}\n`)
+  console.log(`  ${t('Config: %s', getConfigFilePath())}\n`)
 }
 
 function validateBudgetSetters(opts: BudgetCommandOpts): boolean {
@@ -352,7 +352,7 @@ function validateBudgetSetters(opts: BudgetCommandOpts): boolean {
   if (invalid.length === 0) return true
 
   for (const item of invalid) {
-    console.error(`\n  ${item.flag} must be a finite number greater than 0 (got: ${String(item.value)}).\n`)
+    console.error(`\n  ${t('%1$s must be a finite number greater than 0 (got: %2$s).', item.flag, String(item.value))}\n`)
   }
   process.exitCode = 1
   return false
@@ -368,7 +368,7 @@ function assignBudgetSetters(config: CodeburnConfig, opts: BudgetCommandOpts): v
 
 function removeBudget(config: CodeburnConfig, tier: string): boolean {
   if (tier !== 'daily' && tier !== 'weekly' && tier !== 'monthly') {
-    console.error(`\n  Unknown budget period: ${tier}. Use daily, weekly, or monthly.\n`)
+    console.error(`\n  ${t('Unknown budget period: %s. Use daily, weekly, or monthly.', tier)}\n`)
     process.exitCode = 1
     return false
   }
@@ -384,8 +384,8 @@ function removeBudget(config: CodeburnConfig, tier: string): boolean {
 async function runBudgetCheck(budget: CodeburnConfig['budget']): Promise<void> {
   const entries = configuredBudgetEntries(budget)
   if (entries.length === 0) {
-    console.log('\n  No budgets configured.')
-    console.log('  Add one with: codeburn budget --monthly <amount>\n')
+    console.log(`\n  ${t('No budgets configured.')}`)
+    console.log(`  ${t('Add one with: codeburn budget --monthly <amount>')}\n`)
     return
   }
 
@@ -402,9 +402,9 @@ async function runBudgetCheck(budget: CodeburnConfig['budget']): Promise<void> {
       elapsedDays: period.elapsedDays,
       totalDays: period.totalDays,
     })
-    const label = status.state === 'over' ? 'OVER' : status.state === 'warn' ? 'WARN' : 'OK'
+    const label = status.state === 'over' ? t('OVER') : status.state === 'warn' ? t('WARN') : t('OK')
     if (status.state === 'over') over = true
-    console.log(`  ${entry.tier}: ${formatDisplayCurrencyAmount(status.spent)} of ${formatDisplayCurrencyAmount(status.budget)} (${Math.floor(status.pct)}%) [${label}]`)
+    console.log(`  ${t('%1$s: %2$s of %3$s (%4$d%%) [%5$s]', entry.tier, formatDisplayCurrencyAmount(status.spent), formatDisplayCurrencyAmount(status.budget), Math.floor(status.pct), label)}`)
     clearSessionCache()
   }
   console.log('')
@@ -432,7 +432,7 @@ function sortedPlans(plans: Partial<Record<PlanProvider, Plan>>): Plan[] {
 function assertFormat(value: string, allowed: readonly string[], command: string): void {
   if (!allowed.includes(value)) {
     process.stderr.write(
-      `codeburn ${command}: unknown format "${value}". Valid values: ${allowed.join(', ')}.\n`
+      `${t('codeburn %1$s: unknown format "%2$s". Valid values: %3$s.', command, value, allowed.join(', '))}\n`
     )
     process.exit(1)
   }
@@ -450,7 +450,7 @@ function assertProvider(value: string, command: string): void {
   const names = allProviderNames()
   if (value === 'all' || names.includes(value)) return
   process.stderr.write(
-    `codeburn ${command}: unknown provider "${value}". Valid values: all, ${names.join(', ')}.\n`
+    `${t('codeburn %1$s: unknown provider "%2$s". Valid values: all, %3$s.', command, value, names.join(', '))}\n`
   )
   process.exit(1)
 }
@@ -458,7 +458,7 @@ function assertProvider(value: string, command: string): void {
 function assertScope(value: string, allowed: readonly string[], command: string): void {
   if (!allowed.includes(value)) {
     process.stderr.write(
-      `codeburn ${command}: unknown scope "${value}". Valid values: ${allowed.join(', ')}.\n`
+      `${t('codeburn %1$s: unknown scope "%2$s". Valid values: %3$s.', command, value, allowed.join(', '))}\n`
     )
     process.exit(1)
   }
@@ -480,10 +480,10 @@ async function runJsonReport(period: Period, provider: string, project: string[]
 
 const program = new Command()
   .name('codeburn')
-  .description('See where your AI coding tokens go - by task, tool, model, and project')
+  .description(t('See where your AI coding tokens go - by task, tool, model, and project'))
   .version(version)
-  .option('--verbose', 'print warnings to stderr on read failures and skipped files')
-  .option('--timezone <zone>', 'IANA timezone for date grouping (e.g. Asia/Tokyo, America/New_York)')
+  .option('--verbose', t('print warnings to stderr on read failures and skipped files'))
+  .option('--timezone <zone>', t('IANA timezone for date grouping (e.g. Asia/Tokyo, America/New_York)'))
 
 program.hook('preAction', async (thisCommand) => {
   const tz = thisCommand.opts<{ timezone?: string }>().timezone ?? process.env['CODEBURN_TZ']
@@ -491,7 +491,7 @@ program.hook('preAction', async (thisCommand) => {
     try {
       Intl.DateTimeFormat(undefined, { timeZone: tz })
     } catch {
-      console.error(`\n  Invalid timezone: "${tz}". Use an IANA timezone like "America/New_York" or "Asia/Tokyo".\n`)
+      console.error(`\n  ${t('Invalid timezone: "%s". Use an IANA timezone like "America/New_York" or "Asia/Tokyo".', tz)}\n`)
       process.exit(1)
     }
     process.env.TZ = tz
@@ -647,6 +647,9 @@ function buildJsonReport(projects: ProjectSummary[], period: string, periodKey: 
   const activities = Object.entries(catMap)
     .sort(([, a], [, b]) => (b.cost + b.savings) - (a.cost + a.savings))
     .map(([cat, d]) => ({
+      // Machine-readable `--format json`, not display: the label stays English
+      // so consumers (and the macOS app, which runs its own lookup) key on a
+      // stable value. Terminal surfaces translate at their own render sites.
       category: CATEGORY_LABELS[cat as TaskCategory] ?? cat,
       cost: convertCost(d.cost),
       savings: convertCost(d.savings),
@@ -763,16 +766,16 @@ function buildJsonReport(projects: ProjectSummary[], period: string, periodKey: 
 
 program
   .command('report', { isDefault: true })
-  .description('Interactive usage dashboard')
-  .option('-p, --period <period>', 'Starting period: today, week, 30days, month, all, lifetime (interactive default: today, or week when today is empty)', 'week')
-  .option('--day <date>', 'Single day to review (YYYY-MM-DD, today, or yesterday). Overrides --period when set')
-  .option('--from <date>', 'Start date (YYYY-MM-DD). Overrides --period when set')
-  .option('--to <date>', 'End date (YYYY-MM-DD). Overrides --period when set')
-  .option('--provider <provider>', 'Filter by provider (e.g. claude, gemini, cursor, copilot)', 'all')
-  .option('--format <format>', 'Output format: tui, json', 'tui')
-  .option('--project <name>', 'Show only projects matching name (repeatable)', collect, [])
-  .option('--exclude <name>', 'Exclude projects matching name (repeatable)', collect, [])
-  .option('--refresh <seconds>', 'Auto-refresh interval in seconds (minimum 60; 0 to disable)', parseInteger, 60)
+  .description(t('Interactive usage dashboard'))
+  .option('-p, --period <period>', t('Starting period: today, week, 30days, month, all, lifetime (interactive default: today, or week when today is empty)'), 'week')
+  .option('--day <date>', t('Single day to review (YYYY-MM-DD, today, or yesterday). Overrides --period when set'))
+  .option('--from <date>', t('Start date (YYYY-MM-DD). Overrides --period when set'))
+  .option('--to <date>', t('End date (YYYY-MM-DD). Overrides --period when set'))
+  .option('--provider <provider>', t('Filter by provider (e.g. claude, gemini, cursor, copilot)'), 'all')
+  .option('--format <format>', t('Output format: tui, json'), 'tui')
+  .option('--project <name>', t('Show only projects matching name (repeatable)'), collect, [])
+  .option('--exclude <name>', t('Exclude projects matching name (repeatable)'), collect, [])
+  .option('--refresh <seconds>', t('Auto-refresh interval in seconds (minimum 60; 0 to disable)'), parseInteger, 60)
   .action(async (opts, command) => {
     assertFormat(opts.format, ['tui', 'json'], 'report')
     assertProvider(opts.provider, 'report')
@@ -780,13 +783,13 @@ program
     let daySelection: ReturnType<typeof parseDayFlag> = null
     try {
       if (opts.day && (opts.from || opts.to)) {
-        throw new Error('--day cannot be combined with --from or --to')
+        throw new Error(t('--day cannot be combined with --from or --to'))
       }
       daySelection = parseDayFlag(opts.day)
       customRange = parseDateRangeFlags(opts.from, opts.to)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
-      console.error(`\n  Error: ${message}\n`)
+      console.error(`\n  ${t('Error: %s', message)}\n`)
       process.exit(1)
     }
 
@@ -815,11 +818,11 @@ program
 
 program
   .command('share [action]')
-  .description("Securely share this device's usage with your other devices. Actions: status. Supports --format json for status.")
-  .option('--port <number>', 'Port to listen on', parseInteger, 7777)
-  .option('--pair', 'Open a pairing window and print a PIN to add a new device')
-  .option('--always', 'Keep sharing until stopped (default stops after 10 min idle)')
-  .option('--format <format>', 'Output format: text, json', 'text')
+  .description(t("Securely share this device's usage with your other devices. Actions: status. Supports --format json for status."))
+  .option('--port <number>', t('Port to listen on'), parseInteger, 7777)
+  .option('--pair', t('Open a pairing window and print a PIN to add a new device'))
+  .option('--always', t('Keep sharing until stopped (default stops after 10 min idle)'))
+  .option('--format <format>', t('Output format: text, json'), 'text')
   .action(async (action: string | undefined, opts) => {
     assertFormat(opts.format, ['text', 'json'], 'share')
     if (action === 'status') {
@@ -829,15 +832,15 @@ program
         console.log(JSON.stringify(status))
         return
       }
-      console.log(`\n  Sharing: ${status.sharing ? 'on' : 'off'}\n  Name: ${status.name}\n  Port: ${status.port}\n  Paired peers: ${status.peers}\n`)
+      console.log(`\n  ${status.sharing ? t('Sharing: on') : t('Sharing: off')}\n  ${t('Name: %s', status.name)}\n  ${t('Port: %s', status.port)}\n  ${t('Paired peers: %d', status.peers)}\n`)
       return
     }
     if (action !== undefined) {
-      process.stderr.write('codeburn share: unknown action. Valid values: status.\n')
+      process.stderr.write(`${t('codeburn share: unknown action. Valid values: status.')}\n`)
       process.exit(1)
     }
     if (opts.format === 'json') {
-      process.stderr.write('codeburn share: --format json is only supported for `share status`.\n')
+      process.stderr.write(t('codeburn share: --format json is only supported for `share status`.') + '\n')
       process.exit(1)
     }
     await runShareServer({ port: opts.port, pair: !!opts.pair, always: !!opts.always })
@@ -845,11 +848,11 @@ program
 
 program
   .command('devices [action] [target]')
-  .description('Combined usage across your devices. Actions: scan | add (find nearby & pair) | add <host> --pin <pin> (manual) | rm <name>. Supports --format json for read-only output and scan.')
-  .option('--pin <pin>', 'Pairing PIN shown on the device you are adding')
-  .option('-p, --period <period>', 'Period: today, week, 30days, month, all, lifetime', 'month')
-  .option('--port <number>', 'Default port when adding a device', parseInteger, 7777)
-  .option('--format <format>', 'Output format: text, json', 'text')
+  .description(t('Combined usage across your devices. Actions: scan | add (find nearby & pair) | add <host> --pin <pin> (manual) | rm <name>. Supports --format json for read-only output and scan.'))
+  .option('--pin <pin>', t('Pairing PIN shown on the device you are adding'))
+  .option('-p, --period <period>', t('Period: today, week, 30days, month, all, lifetime'), 'month')
+  .option('--port <number>', t('Default port when adding a device'), parseInteger, 7777)
+  .option('--format <format>', t('Output format: text, json'), 'text')
   .action(async (action: string | undefined, target: string | undefined, opts) => {
     assertFormat(opts.format, ['text', 'json'], 'devices')
     await loadPricing()
@@ -872,54 +875,54 @@ program
         return
       }
       if (found.length === 0) {
-        console.log('\n  No devices found. On the other Mac run `codeburn share`, and make sure both are on the same Wi-Fi.\n')
+        console.log('\n  ' + t('No devices found. On the other Mac run `codeburn share`, and make sure both are on the same Wi-Fi.') + '\n')
         return
       }
-      process.stdout.write('\n  Found devices:\n')
+      process.stdout.write(`\n  ${t('Found devices:')}\n`)
       for (const d of found) {
-        process.stdout.write(`    ${d.name} (${d.host}:${d.port}) ${d.paired ? '[paired]' : `[code ${d.code}]`}\n`)
+        process.stdout.write(`    ${d.name} (${d.host}:${d.port}) ${d.paired ? t('[paired]') : t('[code %s]', d.code)}\n`)
       }
       process.stdout.write('\n')
       return
     }
     if (opts.format === 'json' && action !== undefined) {
-      process.stderr.write('codeburn devices: --format json is only supported for read-only devices output and scan.\n')
+      process.stderr.write(`${t('codeburn devices: --format json is only supported for read-only devices output and scan.')}\n`)
       process.exit(1)
     }
     if (action === 'add') {
       if (target && opts.pin) {
         const device = await addRemote(target, opts.pin, { defaultPort: opts.port })
-        console.log(`\n  Paired with "${device.name}" (${device.host}:${device.port}).\n`)
+        console.log(`\n  ${t('Paired with "%1$s" (%2$s:%3$s).', device.name, device.host, device.port)}\n`)
         return
       }
-      process.stdout.write('\n  Looking for devices on your network...\n')
+      process.stdout.write(`\n  ${t('Looking for devices on your network...')}\n`)
       const found = await browse(3000)
       if (found.length === 0) {
-        console.error('  No devices found. On the other Mac run `codeburn share`, and make sure both are on the same Wi-Fi.\n')
+        console.error('  ' + t('No devices found. On the other Mac run `codeburn share`, and make sure both are on the same Wi-Fi.') + '\n')
         process.exit(1)
       }
       let chosen = found[0]!
       if (found.length > 1) {
         found.forEach((d, i) => process.stdout.write(`    ${i + 1}) ${d.name} (${d.host})\n`))
-        const n = await promptChoice('  Connect to which? [number]', found.length)
+        const n = await promptChoice(`  ${t('Connect to which? [number]')}`, found.length)
         if (n < 1) {
-          console.error('  Cancelled.\n')
+          console.error(`  ${t('Cancelled.')}\n`)
           process.exit(1)
         }
         chosen = found[n - 1]!
       }
       const device = await linkRemote(chosen, {
         onCode: (code) =>
-          process.stdout.write(`\n  Connecting to "${chosen.name}". Confirm this code on that device:  ${code}\n  Waiting for approval...\n`),
+          process.stdout.write(`\n  ${t('Connecting to "%1$s". Confirm this code on that device:  %2$s', chosen.name, code)}\n  ${t('Waiting for approval...')}\n`),
       })
-      console.log(`\n  Paired with "${device.name}".\n`)
+      console.log(`\n  ${t('Paired with "%s".', device.name)}\n`)
       return
     }
     if (action === 'rm' || action === 'remove') {
       const remotes = await loadRemotes()
       const next = remotes.filter((r) => r.name !== target && `${r.host}:${r.port}` !== target)
       await saveRemotes(next)
-      console.log(`\n  Removed ${remotes.length - next.length} device(s).\n`)
+      console.log(`\n  ${t('Removed %d device(s).', remotes.length - next.length)}\n`)
       return
     }
     const localGetUsage = async (q: { period?: string; from?: string; to?: string }) => {
@@ -939,8 +942,8 @@ program
 
 program
   .command('identity')
-  .description('Show this device identity for sharing')
-  .option('--format <format>', 'Output format: text, json', 'text')
+  .description(t('Show this device identity for sharing'))
+  .option('--format <format>', t('Output format: text, json'), 'text')
   .action(async (opts) => {
     assertFormat(opts.format, ['text', 'json'], 'identity')
     const id = await loadOrCreateIdentity(getSharingDir())
@@ -949,19 +952,19 @@ program
       console.log(JSON.stringify(publicIdentity))
       return
     }
-    console.log(`\n  Name: ${publicIdentity.name}\n  Fingerprint: ${publicIdentity.fingerprint}\n`)
+    console.log(`\n  ${t('Name: %s', publicIdentity.name)}\n  ${t('Fingerprint: %s', publicIdentity.fingerprint)}\n`)
   })
 
 program
   .command('overview')
-  .description('Plain-text usage overview, copy-pasteable (defaults to this month)')
-  .option('-p, --period <period>', 'Period: today, week, 30days, month, all, lifetime', 'month')
-  .option('--from <date>', 'Start date (YYYY-MM-DD). Overrides --period when set')
-  .option('--to <date>', 'End date (YYYY-MM-DD). Overrides --period when set')
-  .option('--provider <provider>', 'Filter by provider (e.g. claude, codex, copilot)', 'all')
-  .option('--project <name>', 'Show only projects matching name (repeatable)', collect, [])
-  .option('--exclude <name>', 'Exclude projects matching name (repeatable)', collect, [])
-  .option('--no-color', 'Disable ANSI colors')
+  .description(t('Plain-text usage overview, copy-pasteable (defaults to this month)'))
+  .option('-p, --period <period>', t('Period: today, week, 30days, month, all, lifetime'), 'month')
+  .option('--from <date>', t('Start date (YYYY-MM-DD). Overrides --period when set'))
+  .option('--to <date>', t('End date (YYYY-MM-DD). Overrides --period when set'))
+  .option('--provider <provider>', t('Filter by provider (e.g. claude, codex, copilot)'), 'all')
+  .option('--project <name>', t('Show only projects matching name (repeatable)'), collect, [])
+  .option('--exclude <name>', t('Exclude projects matching name (repeatable)'), collect, [])
+  .option('--no-color', t('Disable ANSI colors'))
   .action(async (opts) => {
     assertProvider(opts.provider, 'overview')
     await loadPricing()
@@ -969,7 +972,7 @@ program
     try {
       customRange = parseDateRangeFlags(opts.from, opts.to)
     } catch (err) {
-      console.error(`\n  Error: ${err instanceof Error ? err.message : String(err)}\n`)
+      console.error(`\n  ${t('Error: %s', err instanceof Error ? err.message : String(err))}\n`)
       process.exit(1)
     }
     const period = customRange ? undefined : toPeriod(opts.period)
@@ -1004,13 +1007,13 @@ program
 
 program
   .command('budget')
-  .description('Set spend budgets and check current spend against them')
-  .option('--daily <amt>', 'Set daily spend budget in the active display currency', parseNumber)
-  .option('--weekly <amt>', 'Set weekly spend budget in the active display currency', parseNumber)
-  .option('--monthly <amt>', 'Set monthly spend budget in the active display currency', parseNumber)
-  .option('--list', 'List configured spend budgets')
-  .option('--remove <period>', 'Remove one budget: daily, weekly, or monthly')
-  .option('--check', 'Check current spend and exit 1 if any configured budget is over')
+  .description(t('Set spend budgets and check current spend against them'))
+  .option('--daily <amt>', t('Set daily spend budget in the active display currency'), parseNumber)
+  .option('--weekly <amt>', t('Set weekly spend budget in the active display currency'), parseNumber)
+  .option('--monthly <amt>', t('Set monthly spend budget in the active display currency'), parseNumber)
+  .option('--list', t('List configured spend budgets'))
+  .option('--remove <period>', t('Remove one budget: daily, weekly, or monthly'))
+  .option('--check', t('Check current spend and exit 1 if any configured budget is over'))
   .action(async (opts: BudgetCommandOpts) => {
     const config = await readConfig()
     const hasSetter = opts.daily !== undefined || opts.weekly !== undefined || opts.monthly !== undefined
@@ -1023,8 +1026,8 @@ program
     if (opts.remove) {
       if (!removeBudget(config, opts.remove)) return
       await saveConfig(config)
-      console.log(`\n  Removed ${opts.remove} budget.`)
-      console.log(`  Config: ${getConfigFilePath()}\n`)
+      console.log(`\n  ${t('Removed %s budget.', opts.remove)}`)
+      console.log(`  ${t('Config: %s', getConfigFilePath())}\n`)
       return
     }
 
@@ -1036,21 +1039,21 @@ program
     if (!validateBudgetSetters(opts)) return
     assignBudgetSetters(config, opts)
     await saveConfig(config)
-    console.log('\n  Budget saved.')
+    console.log(`\n  ${t('Budget saved.')}`)
     printBudgetList(config.budget)
   })
 
 program
   .command('web')
-  .description('Open the local web dashboard in your browser')
-  .option('-p, --period <period>', 'Initial period: today, week, 30days, month, all, lifetime', 'today')
-  .option('--from <date>', 'Start date (YYYY-MM-DD)')
-  .option('--to <date>', 'End date (YYYY-MM-DD)')
-  .option('--provider <provider>', 'Filter by provider (e.g. claude, codex, copilot)', 'all')
-  .option('--project <name>', 'Show only projects matching name (repeatable)', collect, [])
-  .option('--exclude <name>', 'Exclude projects matching name (repeatable)', collect, [])
-  .option('--port <number>', 'Port to listen on (falls back to a free port if taken)', parseInteger, 4747)
-  .option('--no-open', 'Do not open the browser automatically')
+  .description(t('Open the local web dashboard in your browser'))
+  .option('-p, --period <period>', t('Initial period: today, week, 30days, month, all, lifetime'), 'today')
+  .option('--from <date>', t('Start date (YYYY-MM-DD)'))
+  .option('--to <date>', t('End date (YYYY-MM-DD)'))
+  .option('--provider <provider>', t('Filter by provider (e.g. claude, codex, copilot)'), 'all')
+  .option('--project <name>', t('Show only projects matching name (repeatable)'), collect, [])
+  .option('--exclude <name>', t('Exclude projects matching name (repeatable)'), collect, [])
+  .option('--port <number>', t('Port to listen on (falls back to a free port if taken)'), parseInteger, 4747)
+  .option('--no-open', t('Do not open the browser automatically'))
   .action(async (opts) => {
     assertProvider(opts.provider, 'web')
     await runWebDashboard({
@@ -1067,49 +1070,49 @@ program
 
 program
   .command('status')
-  .description('Compact status output (today + month)')
-  .option('--format <format>', 'Output format: terminal, menubar-json, json', 'terminal')
-  .option('--scope <scope>', 'Usage scope for menubar-json: local, combined', 'local')
-  .option('--provider <provider>', 'Filter by provider (e.g. claude, gemini, cursor, copilot)', 'all')
-  .option('--project <name>', 'Show only projects matching name (repeatable)', collect, [])
-  .option('--exclude <name>', 'Exclude projects matching name (repeatable)', collect, [])
-  .option('--period <period>', 'Primary period for menubar-json: today, week, 30days, month, all, lifetime', 'today')
-  .option('--day <date>', 'Single day for menubar-json (YYYY-MM-DD, today, or yesterday). Overrides --period when set')
-  .option('--from <date>', 'Start date (YYYY-MM-DD) for custom range')
-  .option('--to <date>', 'End date (YYYY-MM-DD) for custom range')
-  .option('--days <dates>', 'Comma-separated dates (YYYY-MM-DD) for multi-day selection')
-  .option('--no-optimize', 'Skip optimize findings (menubar-json only, faster)')
-  .option('--no-timeline', 'Skip the granular timeline (menubar-json only, faster)')
+  .description(t('Compact status output (today + month)'))
+  .option('--format <format>', t('Output format: terminal, menubar-json, json'), 'terminal')
+  .option('--scope <scope>', t('Usage scope for menubar-json: local, combined'), 'local')
+  .option('--provider <provider>', t('Filter by provider (e.g. claude, gemini, cursor, copilot)'), 'all')
+  .option('--project <name>', t('Show only projects matching name (repeatable)'), collect, [])
+  .option('--exclude <name>', t('Exclude projects matching name (repeatable)'), collect, [])
+  .option('--period <period>', t('Primary period for menubar-json: today, week, 30days, month, all, lifetime'), 'today')
+  .option('--day <date>', t('Single day for menubar-json (YYYY-MM-DD, today, or yesterday). Overrides --period when set'))
+  .option('--from <date>', t('Start date (YYYY-MM-DD) for custom range'))
+  .option('--to <date>', t('End date (YYYY-MM-DD) for custom range'))
+  .option('--days <dates>', t('Comma-separated dates (YYYY-MM-DD) for multi-day selection'))
+  .option('--no-optimize', t('Skip optimize findings (menubar-json only, faster)'))
+  .option('--no-timeline', t('Skip the granular timeline (menubar-json only, faster)'))
   .addOption(new Option('--claude-config-source <id>').hideHelp())
   .action(async (opts) => {
     assertFormat(opts.format, ['terminal', 'menubar-json', 'json'], 'status')
     assertScope(opts.scope, ['local', 'combined'], 'status')
     assertProvider(opts.provider, 'status')
     if (opts.day && (opts.from || opts.to)) {
-      process.stderr.write('error: --day cannot be combined with --from or --to\n')
+      process.stderr.write(`${t('error: --day cannot be combined with --from or --to')}\n`)
       process.exit(1)
     }
     if (opts.days && (opts.day || opts.from || opts.to)) {
-      process.stderr.write('error: --days cannot be combined with --day, --from, or --to\n')
+      process.stderr.write(`${t('error: --days cannot be combined with --day, --from, or --to')}\n`)
       process.exit(1)
     }
     if (opts.format === 'menubar-json' && opts.scope === 'combined' && opts.days) {
-      process.stderr.write('error: --scope combined cannot be combined with --days\n')
+      process.stderr.write(`${t('error: --scope combined cannot be combined with --days')}\n`)
       process.exit(1)
     }
     if (opts.format === 'menubar-json' && opts.scope === 'combined' && opts.claudeConfigSource) {
-      process.stderr.write('error: --scope combined cannot be combined with --claude-config-source\n')
+      process.stderr.write(`${t('error: --scope combined cannot be combined with --claude-config-source')}\n`)
       process.exit(1)
     }
     // A Claude config source scopes Claude usage only, so it is contradictory
     // with a non-Claude provider filter. 'all' is fine (it resolves to that
     // config's Claude data).
     if (opts.claudeConfigSource && opts.provider !== 'all' && opts.provider !== 'claude') {
-      process.stderr.write(`error: --claude-config-source cannot be combined with --provider ${opts.provider} (a Claude config scopes Claude usage only)\n`)
+      process.stderr.write(`${t('error: --claude-config-source cannot be combined with --provider %s (a Claude config scopes Claude usage only)', opts.provider)}\n`)
       process.exit(1)
     }
     if (opts.scope === 'combined' && (opts.provider !== 'all' || opts.project.length > 0 || opts.exclude.length > 0)) {
-      process.stderr.write('error: --scope combined cannot be combined with --provider, --project, or --exclude (paired devices report unfiltered usage)\n')
+      process.stderr.write(`${t('error: --scope combined cannot be combined with --provider, --project, or --exclude (paired devices report unfiltered usage)')}\n`)
       process.exit(1)
     }
     await loadPricing()
@@ -1297,12 +1300,12 @@ program
 
 program
   .command('today')
-  .description('Today\'s usage dashboard')
-  .option('--provider <provider>', 'Filter by provider (e.g. claude, gemini, cursor, copilot)', 'all')
-  .option('--format <format>', 'Output format: tui, json', 'tui')
-  .option('--project <name>', 'Show only projects matching name (repeatable)', collect, [])
-  .option('--exclude <name>', 'Exclude projects matching name (repeatable)', collect, [])
-  .option('--refresh <seconds>', 'Auto-refresh interval in seconds (minimum 60; 0 to disable)', parseInteger, 60)
+  .description(t('Today\'s usage dashboard'))
+  .option('--provider <provider>', t('Filter by provider (e.g. claude, gemini, cursor, copilot)'), 'all')
+  .option('--format <format>', t('Output format: tui, json'), 'tui')
+  .option('--project <name>', t('Show only projects matching name (repeatable)'), collect, [])
+  .option('--exclude <name>', t('Exclude projects matching name (repeatable)'), collect, [])
+  .option('--refresh <seconds>', t('Auto-refresh interval in seconds (minimum 60; 0 to disable)'), parseInteger, 60)
   .action(async (opts) => {
     assertFormat(opts.format, ['tui', 'json'], 'today')
     assertProvider(opts.provider, 'today')
@@ -1315,12 +1318,12 @@ program
 
 program
   .command('month')
-  .description('This month\'s usage dashboard')
-  .option('--provider <provider>', 'Filter by provider (e.g. claude, gemini, cursor, copilot)', 'all')
-  .option('--format <format>', 'Output format: tui, json', 'tui')
-  .option('--project <name>', 'Show only projects matching name (repeatable)', collect, [])
-  .option('--exclude <name>', 'Exclude projects matching name (repeatable)', collect, [])
-  .option('--refresh <seconds>', 'Auto-refresh interval in seconds (minimum 60; 0 to disable)', parseInteger, 60)
+  .description(t('This month\'s usage dashboard'))
+  .option('--provider <provider>', t('Filter by provider (e.g. claude, gemini, cursor, copilot)'), 'all')
+  .option('--format <format>', t('Output format: tui, json'), 'tui')
+  .option('--project <name>', t('Show only projects matching name (repeatable)'), collect, [])
+  .option('--exclude <name>', t('Exclude projects matching name (repeatable)'), collect, [])
+  .option('--refresh <seconds>', t('Auto-refresh interval in seconds (minimum 60; 0 to disable)'), parseInteger, 60)
   .action(async (opts) => {
     assertFormat(opts.format, ['tui', 'json'], 'month')
     assertProvider(opts.provider, 'month')
@@ -1333,14 +1336,14 @@ program
 
 program
   .command('export')
-  .description('Export usage data to CSV or JSON')
-  .option('-f, --format <format>', 'Export format: csv, json', 'csv')
-  .option('-o, --output <path>', 'Output file path')
-  .option('--from <date>', 'Start date (YYYY-MM-DD). Exports a single custom period when set')
-  .option('--to <date>', 'End date (YYYY-MM-DD). Exports a single custom period when set')
-  .option('--provider <provider>', 'Filter by provider (e.g. claude, gemini, cursor, copilot)', 'all')
-  .option('--project <name>', 'Show only projects matching name (repeatable)', collect, [])
-  .option('--exclude <name>', 'Exclude projects matching name (repeatable)', collect, [])
+  .description(t('Export usage data to CSV or JSON'))
+  .option('-f, --format <format>', t('Export format: csv, json'), 'csv')
+  .option('-o, --output <path>', t('Output file path'))
+  .option('--from <date>', t('Start date (YYYY-MM-DD). Exports a single custom period when set'))
+  .option('--to <date>', t('End date (YYYY-MM-DD). Exports a single custom period when set'))
+  .option('--provider <provider>', t('Filter by provider (e.g. claude, gemini, cursor, copilot)'), 'all')
+  .option('--project <name>', t('Show only projects matching name (repeatable)'), collect, [])
+  .option('--exclude <name>', t('Exclude projects matching name (repeatable)'), collect, [])
   .action(async (opts) => {
     assertFormat(opts.format, ['csv', 'json'], 'export')
     assertProvider(opts.provider, 'export')
@@ -1352,7 +1355,7 @@ program
       customRange = parseDateRangeFlags(opts.from, opts.to)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
-      console.error(`\n  Error: ${message}\n`)
+      console.error(`\n  ${t('Error: %s', message)}\n`)
       process.exit(1)
     }
 
@@ -1374,7 +1377,7 @@ program
       // Human-readable prose for CSV / interactive use. JSON falls through and
       // writes a valid, schema-matching file with empty arrays so programmatic
       // consumers always get parseable output, never prose.
-      console.log('\n  No usage data found.\n')
+      console.log(`\n  ${t('No usage data found.')}\n`)
       return
     }
 
@@ -1393,61 +1396,61 @@ program
       // throw with a user-readable message. Print just the message, not the stack, so the CLI
       // doesn't spray its internals at the user.
       const message = err instanceof Error ? err.message : String(err)
-      console.error(`\n  Export failed: ${message}\n`)
+      console.error(`\n  ${t('Export failed: %s', message)}\n`)
       process.exit(1)
     }
 
     const exportedLabel = customRange ? formatDateRangeLabel(opts.from, opts.to) : 'Today + 7 Days + 30 Days'
-    console.log(`\n  Exported (${exportedLabel}) to: ${savedPath}\n`)
+    console.log(`\n  ${t('Exported (%1$s) to: %2$s', exportedLabel, savedPath)}\n`)
   })
 
 program
   .command('menubar')
-  .description('Install and launch the menubar app on macOS and Windows (one command, no clone)')
-  .option('--force', 'Reinstall even if a copy is already installed')
+  .description(t('Install and launch the menubar app on macOS and Windows (one command, no clone)'))
+  .option('--force', t('Reinstall even if a copy is already installed'))
   .action(async (opts: { force?: boolean }) => {
     try {
       const result = await installMenubarApp({ force: opts.force, cliVersion: version })
       // A cancelled Windows installer leaves nothing to point at.
-      if (result.installedPath) console.log(`\n  Ready. ${result.installedPath}\n`)
+      if (result.installedPath) console.log(`\n  ${t('Ready. %s', result.installedPath)}\n`)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
-      console.error(`\n  Menubar install failed: ${message}\n`)
+      console.error(`\n  ${t('Menubar install failed: %s', message)}\n`)
       process.exit(1)
     }
   })
 
 program
   .command('currency [code]')
-  .description('Set display currency (e.g. codeburn currency GBP)')
-  .option('--symbol <symbol>', 'Override the currency symbol')
-  .option('--reset', 'Reset to USD (removes currency config)')
+  .description(t('Set display currency (e.g. codeburn currency GBP)'))
+  .option('--symbol <symbol>', t('Override the currency symbol'))
+  .option('--reset', t('Reset to USD (removes currency config)'))
   .action(async (code?: string, opts?: { symbol?: string; reset?: boolean }) => {
     if (opts?.reset) {
       const config = await readConfig()
       delete config.currency
       await saveConfig(config)
-      console.log('\n  Currency reset to USD.\n')
+      console.log(`\n  ${t('Currency reset to USD.')}\n`)
       return
     }
 
     if (!code) {
       const { code: activeCode, rate, symbol } = getCurrency()
       if (activeCode === 'USD' && rate === 1) {
-        console.log('\n  Currency: USD (default)')
-        console.log(`  Config: ${getConfigFilePath()}\n`)
+        console.log(`\n  ${t('Currency: USD (default)')}`)
+        console.log(`  ${t('Config: %s', getConfigFilePath())}\n`)
       } else {
-        console.log(`\n  Currency: ${activeCode}`)
-        console.log(`  Symbol: ${symbol}`)
-        console.log(`  Rate: 1 USD = ${rate} ${activeCode}`)
-        console.log(`  Config: ${getConfigFilePath()}\n`)
+        console.log(`\n  ${t('Currency: %s', activeCode)}`)
+        console.log(`  ${t('Symbol: %s', symbol)}`)
+        console.log(`  ${t('Rate: 1 USD = %1$s %2$s', rate, activeCode)}`)
+        console.log(`  ${t('Config: %s', getConfigFilePath())}\n`)
       }
       return
     }
 
     const upperCode = code.toUpperCase()
     if (!isValidCurrencyCode(upperCode)) {
-      console.error(`\n  "${code}" is not a valid ISO 4217 currency code.\n`)
+      console.error(`\n  ${t('"%s" is not a valid ISO 4217 currency code.', code)}\n`)
       process.exitCode = 1
       return
     }
@@ -1462,37 +1465,37 @@ program
     await loadCurrency()
     const { rate, symbol } = getCurrency()
 
-    console.log(`\n  Currency set to ${upperCode}.`)
-    console.log(`  Symbol: ${symbol}`)
-    console.log(`  Rate: 1 USD = ${rate} ${upperCode}`)
-    console.log(`  Config saved to ${getConfigFilePath()}\n`)
+    console.log(`\n  ${t('Currency set to %s.', upperCode)}`)
+    console.log(`  ${t('Symbol: %s', symbol)}`)
+    console.log(`  ${t('Rate: 1 USD = %1$s %2$s', rate, upperCode)}`)
+    console.log(`  ${t('Config saved to %s', getConfigFilePath())}\n`)
   })
 
 program
   .command('lang [code]')
-  .description(`Set the interface language (${SUPPORTED_LANGUAGES.join(', ')}; e.g. codeburn lang zh-CN)`)
-  .option('--reset', 'Follow the system locale again')
+  .description(t('Set the interface language (%s; e.g. codeburn lang zh-CN)', SUPPORTED_LANGUAGES.join(', ')))
+  .option('--reset', t('Follow the system locale again'))
   .action(async (code?: string, opts?: { reset?: boolean }) => {
     if (opts?.reset) {
       const config = await readConfig()
       delete config.lang
       await saveConfig(config)
       setLanguage(resolveLanguage({ configured: undefined }))
-      console.log(`\n  Language follows the system locale (now ${getLanguageLabel()}).`)
-      console.log(`  Config: ${getConfigFilePath()}\n`)
+      console.log(`\n  ${t('Language follows the system locale (now %s).', getLanguageLabel())}`)
+      console.log(`  ${t('Config: %s', getConfigFilePath())}\n`)
       return
     }
 
     if (!code) {
       const config = await readConfig()
-      console.log(`\n  Language: ${getLanguageLabel()}${config.lang ? '' : ' (from system locale)'}`)
-      console.log(`  Available: ${SUPPORTED_LANGUAGES.join(', ')}`)
-      console.log(`  Config: ${getConfigFilePath()}\n`)
+      console.log(`\n  ${config.lang ? t('Language: %s', getLanguageLabel()) : t('Language: %s (from system locale)', getLanguageLabel())}`)
+      console.log(`  ${t('Available: %s', SUPPORTED_LANGUAGES.join(', '))}`)
+      console.log(`  ${t('Config: %s', getConfigFilePath())}\n`)
       return
     }
 
     if (!isLanguage(code)) {
-      console.error(`\n  "${code}" is not a supported language. Available: ${SUPPORTED_LANGUAGES.join(', ')}\n`)
+      console.error(`\n  ${t('"%1$s" is not a supported language. Available: %2$s', code, SUPPORTED_LANGUAGES.join(', '))}\n`)
       process.exitCode = 1
       return
     }
@@ -1507,10 +1510,10 @@ program
 
 program
   .command('model-alias [from] [to]')
-  .description('Map a provider model name to a canonical one for pricing (e.g. codeburn model-alias my-model claude-opus-4-6)')
-  .option('--remove <from>', 'Remove an alias')
-  .option('--list', 'List configured aliases')
-  .option('--format <format>', 'Output format: text, json', 'text')
+  .description(t('Map a provider model name to a canonical one for pricing (e.g. codeburn model-alias my-model claude-opus-4-6)'))
+  .option('--remove <from>', t('Remove an alias'))
+  .option('--list', t('List configured aliases'))
+  .option('--format <format>', t('Output format: text, json'), 'text')
   .action(async (from?: string, to?: string, opts?: { remove?: string; list?: boolean; format?: string }) => {
     const format = opts?.format ?? 'text'
     assertFormat(format, ['text', 'json'], 'model-alias')
@@ -1524,33 +1527,33 @@ program
       }
       const entries = Object.entries(aliases)
       if (entries.length === 0) {
-        console.log('\n  No model aliases configured.')
-        console.log(`  Config: ${getConfigFilePath()}\n`)
+        console.log(`\n  ${t('No model aliases configured.')}`)
+        console.log(`  ${t('Config: %s', getConfigFilePath())}\n`)
       } else {
-        console.log('\n  Model aliases:')
+        console.log(`\n  ${t('Model aliases:')}`)
         for (const [src, dst] of entries) {
           console.log(`    ${src} -> ${dst}`)
         }
-        console.log(`  Config: ${getConfigFilePath()}\n`)
+        console.log(`  ${t('Config: %s', getConfigFilePath())}\n`)
       }
       return
     }
 
     if (opts?.remove) {
       if (!(opts.remove in aliases)) {
-        console.error(`\n  Alias not found: ${opts.remove}\n`)
+        console.error(`\n  ${t('Alias not found: %s', opts.remove)}\n`)
         process.exitCode = 1
         return
       }
       delete aliases[opts.remove]
       config.modelAliases = Object.keys(aliases).length > 0 ? aliases : undefined
       await saveConfig(config)
-      console.log(`\n  Removed alias: ${opts.remove}\n`)
+      console.log(`\n  ${t('Removed alias: %s', opts.remove)}\n`)
       return
     }
 
     if (!from || !to) {
-      console.error('\n  Usage: codeburn model-alias <from> <to>\n')
+      console.error(`\n  ${t('Usage: codeburn model-alias <from> <to>')}\n`)
       process.exitCode = 1
       return
     }
@@ -1558,20 +1561,20 @@ program
     aliases[from] = to
     config.modelAliases = aliases
     await saveConfig(config)
-    console.log(`\n  Alias saved: ${from} -> ${to}`)
-    console.log(`  Config: ${getConfigFilePath()}\n`)
+    console.log(`\n  ${t('Alias saved: %1$s -> %2$s', from, to)}`)
+    console.log(`  ${t('Config: %s', getConfigFilePath())}\n`)
   })
 
 program
   .command('price-override [model]')
-  .description('Override or add local model pricing. Rates are USD per 1,000,000 tokens (e.g. --input 0.27).')
-  .option('--input <usd-per-1M>', 'Input token price in USD per 1,000,000 tokens', parseNumber)
-  .option('--output <usd-per-1M>', 'Output token price in USD per 1,000,000 tokens', parseNumber)
-  .option('--cache-read <usd-per-1M>', 'Cache-read token price in USD per 1,000,000 tokens', parseNumber)
-  .option('--cache-creation <usd-per-1M>', 'Cache-creation token price in USD per 1,000,000 tokens', parseNumber)
-  .option('--remove <model>', 'Remove a price override')
-  .option('--list', 'List configured price overrides')
-  .option('--format <format>', 'Output format: text, json', 'text')
+  .description(t('Override or add local model pricing. Rates are USD per 1,000,000 tokens (e.g. --input 0.27).'))
+  .option('--input <usd-per-1M>', t('Input token price in USD per 1,000,000 tokens'), parseNumber)
+  .option('--output <usd-per-1M>', t('Output token price in USD per 1,000,000 tokens'), parseNumber)
+  .option('--cache-read <usd-per-1M>', t('Cache-read token price in USD per 1,000,000 tokens'), parseNumber)
+  .option('--cache-creation <usd-per-1M>', t('Cache-creation token price in USD per 1,000,000 tokens'), parseNumber)
+  .option('--remove <model>', t('Remove a price override'))
+  .option('--list', t('List configured price overrides'))
+  .option('--format <format>', t('Output format: text, json'), 'text')
   .action(async (model?: string, opts?: PriceOverrideOptions) => {
     const format = opts?.format ?? 'text'
     assertFormat(format, ['text', 'json'], 'price-override')
@@ -1585,30 +1588,30 @@ program
       }
       const entries = [...overrides.entries()]
       if (entries.length === 0) {
-        console.log('\n  No price overrides configured.')
-        console.log('  Rates use USD per 1,000,000 tokens.')
-        console.log(`  Config: ${getConfigFilePath()}`)
-        console.log('  Add one with: codeburn price-override <model> --input <usd-per-1M> --output <usd-per-1M>\n')
+        console.log(`\n  ${t('No price overrides configured.')}`)
+        console.log(`  ${t('Rates use USD per 1,000,000 tokens.')}`)
+        console.log(`  ${t('Config: %s', getConfigFilePath())}`)
+        console.log(`  ${t('Add one with: codeburn price-override <model> --input <usd-per-1M> --output <usd-per-1M>')}\n`)
       } else {
-        console.log('\n  Price overrides (USD per 1,000,000 tokens):')
+        console.log(`\n  ${t('Price overrides (USD per 1,000,000 tokens):')}`)
         for (const [name, rates] of entries) {
           console.log(`    ${name}: ${formatPriceOverrideParts(rates)}`)
         }
-        console.log(`  Config: ${getConfigFilePath()}\n`)
+        console.log(`  ${t('Config: %s', getConfigFilePath())}\n`)
       }
       return
     }
 
     if (opts?.remove) {
       if (!overrides.has(opts.remove)) {
-        console.error(`\n  Price override not found: ${opts.remove}\n`)
+        console.error(`\n  ${t('Price override not found: %s', opts.remove)}\n`)
         process.exitCode = 1
         return
       }
       overrides.delete(opts.remove)
       config.priceOverrides = overrides.size > 0 ? Object.fromEntries(overrides) : undefined
       await saveConfig(config)
-      console.log(`\n  Removed price override: ${opts.remove}\n`)
+      console.log(`\n  ${t('Removed price override: %s', opts.remove)}\n`)
       return
     }
 
@@ -1617,7 +1620,7 @@ program
     const cacheRead = opts?.cacheRead
     const cacheCreation = opts?.cacheCreation
     if (!model || input === undefined || output === undefined) {
-      console.error('\n  Usage: codeburn price-override <model> --input <usd-per-1M> --output <usd-per-1M> [--cache-read <usd-per-1M>] [--cache-creation <usd-per-1M>]\n')
+      console.error(`\n  ${t('Usage: codeburn price-override <model> --input <usd-per-1M> --output <usd-per-1M> [--cache-read <usd-per-1M>] [--cache-creation <usd-per-1M>]')}\n`)
       process.exitCode = 1
       return
     }
@@ -1643,16 +1646,16 @@ program
     overrides.set(model, override)
     config.priceOverrides = Object.fromEntries(overrides)
     await saveConfig(config)
-    console.log(`\n  Price override saved: ${model}: ${formatPriceOverrideParts(override)}`)
-    console.log('  Unit: USD per 1,000,000 tokens')
-    console.log(`  Config: ${getConfigFilePath()}\n`)
+    console.log(`\n  ${t('Price override saved: %1$s: %2$s', model, formatPriceOverrideParts(override))}`)
+    console.log(`  ${t('Unit: USD per 1,000,000 tokens')}`)
+    console.log(`  ${t('Config: %s', getConfigFilePath())}\n`)
   })
 
 program
   .command('model-savings [local] [baseline]')
-  .description('Track a local model as "savings" rather than cost. Maps a local-model name to a paid baseline so the dashboard can show what the same tokens would have cost on the baseline (e.g. codeburn model-savings "llama3.1:8b" gpt-4o). The local call itself still costs $0 — actual cost is left untouched.')
-  .option('--remove <local>', 'Remove a savings mapping for the given local model')
-  .option('--list', 'List configured savings mappings')
+  .description(t('Track a local model as "savings" rather than cost. Maps a local-model name to a paid baseline so the dashboard can show what the same tokens would have cost on the baseline (e.g. codeburn model-savings "llama3.1:8b" gpt-4o). The local call itself still costs $0 — actual cost is left untouched.'))
+  .option('--remove <local>', t('Remove a savings mapping for the given local model'))
+  .option('--list', t('List configured savings mappings'))
   .action(async (local?: string, baseline?: string, opts?: { remove?: string; list?: boolean }) => {
     const config = await readConfig()
     const mappings = { ...(config.localModelSavings ?? {}) }
@@ -1660,34 +1663,34 @@ program
     if (opts?.list || (!local && !opts?.remove)) {
       const entries = Object.entries(mappings)
       if (entries.length === 0) {
-        console.log('\n  No local-model savings mappings configured.')
-        console.log(`  Config: ${getConfigFilePath()}`)
-        console.log('  Add one with: codeburn model-savings <local-model> <baseline-model>\n')
+        console.log(`\n  ${t('No local-model savings mappings configured.')}`)
+        console.log(`  ${t('Config: %s', getConfigFilePath())}`)
+        console.log(`  ${t('Add one with: codeburn model-savings <local-model> <baseline-model>')}\n`)
       } else {
-        console.log('\n  Local-model savings mappings:')
+        console.log(`\n  ${t('Local-model savings mappings:')}`)
         for (const [src, dst] of entries) {
           console.log(`    ${src} -> ${dst}`)
         }
-        console.log(`  Config: ${getConfigFilePath()}\n`)
+        console.log(`  ${t('Config: %s', getConfigFilePath())}\n`)
       }
       return
     }
 
     if (opts?.remove) {
       if (!(opts.remove in mappings)) {
-        console.error(`\n  No savings mapping found for: ${opts.remove}\n`)
+        console.error(`\n  ${t('No savings mapping found for: %s', opts.remove)}\n`)
         process.exitCode = 1
         return
       }
       delete mappings[opts.remove]
       config.localModelSavings = Object.keys(mappings).length > 0 ? mappings : undefined
       await saveConfig(config)
-      console.log(`\n  Removed savings mapping: ${opts.remove}\n`)
+      console.log(`\n  ${t('Removed savings mapping: %s', opts.remove)}\n`)
       return
     }
 
     if (!local || !baseline) {
-      console.error('\n  Usage: codeburn model-savings <local-model> <baseline-model>\n')
+      console.error(`\n  ${t('Usage: codeburn model-savings <local-model> <baseline-model>')}\n`)
       process.exitCode = 1
       return
     }
@@ -1699,19 +1702,19 @@ program
     // Warn when the same model is also in modelAliases so the user is
     // not surprised that `savings` wins for actual cost.
     if (config.modelAliases && Object.hasOwn(config.modelAliases, local)) {
-      console.log(`\n  Note: ${local} is also in modelAliases (-> ${config.modelAliases[local]}).`)
-      console.log('  Local-model savings take precedence: the call is treated as $0 actual cost and the baseline is used for counterfactual savings.')
+      console.log(`\n  ${t('Note: %1$s is also in modelAliases (-> %2$s).', local, config.modelAliases[local])}`)
+      console.log(`  ${t('Local-model savings take precedence: the call is treated as $0 actual cost and the baseline is used for counterfactual savings.')}`)
     }
 
-    console.log(`\n  Savings mapping saved: ${local} -> ${baseline}`)
-    console.log(`  Config: ${getConfigFilePath()}\n`)
+    console.log(`\n  ${t('Savings mapping saved: %1$s -> %2$s', local, baseline)}`)
+    console.log(`  ${t('Config: %s', getConfigFilePath())}\n`)
   })
 
 program
   .command('model-flat-rate [model]')
-  .description('Mark a model as subscription / flat-rate billed. $0 is the correct cost and the unpriced warning is silenced. Do not use model-alias for these — that maps them onto another model\'s per-token rate and invents spend (e.g. codeburn model-flat-rate auto-genius).')
-  .option('--remove <model>', 'Remove a flat-rate mark, including a built-in SKU')
-  .option('--list', 'List configured flat-rate models and built-in opt-outs')
+  .description(t('Mark a model as subscription / flat-rate billed. $0 is the correct cost and the unpriced warning is silenced. Do not use model-alias for these — that maps them onto another model\'s per-token rate and invents spend (e.g. codeburn model-flat-rate auto-genius).'))
+  .option('--remove <model>', t('Remove a flat-rate mark, including a built-in SKU'))
+  .option('--list', t('List configured flat-rate models and built-in opt-outs'))
   .action(async (model?: string, opts?: { remove?: string; list?: boolean }) => {
     const config = await readConfig()
     const marked = [...(config.flatRateModels ?? [])]
@@ -1719,23 +1722,23 @@ program
 
     if (opts?.list || (!model && !opts?.remove)) {
       if (marked.length === 0 && removed.length === 0) {
-        console.log('\n  No flat-rate models configured.')
-        console.log(`  Config: ${getConfigFilePath()}`)
-        console.log('  Add one with: codeburn model-flat-rate <model>\n')
+        console.log(`\n  ${t('No flat-rate models configured.')}`)
+        console.log(`  ${t('Config: %s', getConfigFilePath())}`)
+        console.log(`  ${t('Add one with: codeburn model-flat-rate <model>')}\n`)
       } else {
         if (marked.length > 0) {
-          console.log('\n  Flat-rate / subscription models:')
+          console.log(`\n  ${t('Flat-rate / subscription models:')}`)
           for (const name of marked) {
             console.log(`    ${name}`)
           }
         }
         if (removed.length > 0) {
-          console.log('\n  Built-in flat-rate opt-outs (unpriced warning fires again):')
+          console.log(`\n  ${t('Built-in flat-rate opt-outs (unpriced warning fires again):')}`)
           for (const name of removed) {
             console.log(`    ${name}`)
           }
         }
-        console.log(`  Config: ${getConfigFilePath()}\n`)
+        console.log(`  ${t('Config: %s', getConfigFilePath())}\n`)
       }
       return
     }
@@ -1746,7 +1749,7 @@ program
       const builtIn = isBuiltInFlatRateModel(target)
       const alreadyOptedOut = removed.some(id => isSameFlatRateModel(id, target))
       if (idx < 0 && (!builtIn || alreadyOptedOut)) {
-        console.error(`\n  No flat-rate mark found for: ${target}\n`)
+        console.error(`\n  ${t('No flat-rate mark found for: %s', target)}\n`)
         process.exitCode = 1
         return
       }
@@ -1759,16 +1762,16 @@ program
         config.flatRateModelsRemoved = removed
       }
       await saveConfig(config)
-      console.log(`\n  Removed flat-rate mark: ${target}`)
+      console.log(`\n  ${t('Removed flat-rate mark: %s', target)}`)
       if (builtIn) {
-        console.log('  Built-in SKU opted out; the unpriced warning will fire again until you re-add it.')
+        console.log(`  ${t('Built-in SKU opted out; the unpriced warning will fire again until you re-add it.')}`)
       }
       console.log()
       return
     }
 
     if (!model) {
-      console.error('\n  Usage: codeburn model-flat-rate <model>\n')
+      console.error(`\n  ${t('Usage: codeburn model-flat-rate <model>')}\n`)
       process.exitCode = 1
       return
     }
@@ -1780,20 +1783,20 @@ program
     await saveConfig(config)
 
     if (config.modelAliases && Object.hasOwn(config.modelAliases, model)) {
-      console.log(`\n  Note: ${model} is also in modelAliases (-> ${config.modelAliases[model]}).`)
-      console.log('  The alias still invents per-token spend. Remove it if $0 is the correct cost.')
+      console.log(`\n  ${t('Note: %1$s is also in modelAliases (-> %2$s).', model, config.modelAliases[model])}`)
+      console.log(`  ${t('The alias still invents per-token spend. Remove it if $0 is the correct cost.')}`)
     }
 
-    console.log(`\n  Flat-rate mark saved: ${model}`)
-    console.log(`  Config: ${getConfigFilePath()}\n`)
+    console.log(`\n  ${t('Flat-rate mark saved: %s', model)}`)
+    console.log(`  ${t('Config: %s', getConfigFilePath())}\n`)
   })
 
 program
   .command('proxy-path [path]')
-  .description('Mark a project directory as routed through a subscription-backed LLM proxy (e.g. Claude Code over GitHub Copilot). Sessions whose canonical path is under it keep their full API-rate cost as the "would-be" figure, but that amount is reported as subscription-covered so the report can show net out-of-pocket (e.g. codeburn proxy-path ~/work/copilot-repo). Actual API-key sessions elsewhere are untouched.')
-  .option('--remove <path>', 'Remove a configured proxy path')
-  .option('--list', 'List configured proxy paths')
-  .option('--format <format>', 'Output format: text, json', 'text')
+  .description(t('Mark a project directory as routed through a subscription-backed LLM proxy (e.g. Claude Code over GitHub Copilot). Sessions whose canonical path is under it keep their full API-rate cost as the "would-be" figure, but that amount is reported as subscription-covered so the report can show net out-of-pocket (e.g. codeburn proxy-path ~/work/copilot-repo). Actual API-key sessions elsewhere are untouched.'))
+  .option('--remove <path>', t('Remove a configured proxy path'))
+  .option('--list', t('List configured proxy paths'))
+  .option('--format <format>', t('Output format: text, json'), 'text')
   .action(async (path?: string, opts?: { remove?: string; list?: boolean; format?: string }) => {
     const format = opts?.format ?? 'text'
     assertFormat(format, ['text', 'json'], 'proxy-path')
@@ -1811,13 +1814,13 @@ program
         return
       }
       if (paths.length === 0) {
-        console.log('\n  No proxy paths configured.')
-        console.log(`  Config: ${getConfigFilePath()}`)
-        console.log('  Add one with: codeburn proxy-path <project-dir>\n')
+        console.log(`\n  ${t('No proxy paths configured.')}`)
+        console.log(`  ${t('Config: %s', getConfigFilePath())}`)
+        console.log(`  ${t('Add one with: codeburn proxy-path <project-dir>')}\n`)
       } else {
-        console.log('\n  Proxy paths (sessions under these are subscription-covered):')
+        console.log(`\n  ${t('Proxy paths (sessions under these are subscription-covered):')}`)
         for (const p of paths) console.log(`    ${p}`)
-        console.log(`  Config: ${getConfigFilePath()}\n`)
+        console.log(`  ${t('Config: %s', getConfigFilePath())}\n`)
       }
       return
     }
@@ -1825,57 +1828,56 @@ program
     if (opts?.remove) {
       const idx = paths.findIndex(p => samePath(p, opts.remove!))
       if (idx === -1) {
-        console.error(`\n  No proxy path found matching: ${opts.remove}\n`)
+        console.error(`\n  ${t('No proxy path found matching: %s', opts.remove)}\n`)
         process.exitCode = 1
         return
       }
       paths.splice(idx, 1)
       config.proxyPaths = paths.length > 0 ? paths : undefined
       await saveConfig(config)
-      console.log(`\n  Removed proxy path: ${opts.remove}\n`)
+      console.log(`\n  ${t('Removed proxy path: %s', opts.remove)}\n`)
       return
     }
 
     if (!path) {
-      console.error('\n  Usage: codeburn proxy-path <project-dir>\n')
+      console.error(`\n  ${t('Usage: codeburn proxy-path <project-dir>')}\n`)
       process.exitCode = 1
       return
     }
 
     const trimmed = path.trim()
     if (!isAbsolute(trimmed) || normalizeProxyPath(trimmed) === '') {
-      console.error(`\n  Proxy path must be an absolute project directory (got: ${path}).`)
-      console.error('  codeburn matches sessions by their recorded absolute cwd; the')
-      console.error('  filesystem root is too broad and is not accepted.\n')
+      console.error(`\n  ${t('Proxy path must be an absolute project directory (got: %s).', path)}`)
+      console.error(`  ${t('codeburn matches sessions by their recorded absolute cwd; the filesystem root is too broad and is not accepted.')}\n`)
       process.exitCode = 1
       return
     }
     if (paths.some(p => samePath(p, trimmed))) {
-      console.log(`\n  Proxy path already configured: ${trimmed}\n`)
+      console.log(`\n  ${t('Proxy path already configured: %s', trimmed)}\n`)
       return
     }
     paths.push(trimmed)
     config.proxyPaths = paths
     await saveConfig(config)
-    console.log(`\n  Proxy path saved: ${trimmed}`)
-    console.log('  Sessions under it keep their full API-rate cost as the would-be figure; that amount is reported as subscription-covered (net out-of-pocket excludes it).')
-    console.log(`  Config: ${getConfigFilePath()}\n`)
+    console.log(`\n  ${t('Proxy path saved: %s', trimmed)}`)
+    console.log(`  ${t('Sessions under it keep their full API-rate cost as the would-be figure; that amount is reported as subscription-covered (net out-of-pocket excludes it).')}`)
+    console.log(`  ${t('Config: %s', getConfigFilePath())}\n`)
   })
 
 program
   .command('plan [action] [id]')
-  .description('Show or configure a subscription plan for overage tracking')
-  .option('--format <format>', 'Output format: text or json', 'text')
-  .option('--monthly-usd <n>', 'Monthly plan price in USD (for custom)', parseNumber)
-  .option('--credits <n>', 'Monthly AI credits (copilot custom plans)', parseNumber)
-  .option('--provider <name>', `Provider scope: ${PLAN_PROVIDERS.join(', ')}`)
-  .option('--reset-day <n>', 'Day of month plan resets (1-28)', parseInteger, 1)
+  .description(t('Show or configure a subscription plan for overage tracking'))
+  .option('--format <format>', t('Output format: text or json'), 'text')
+  .option('--monthly-usd <n>', t('Monthly plan price in USD (for custom)'), parseNumber)
+  .option('--credits <n>', t('Monthly AI credits (copilot custom plans)'), parseNumber)
+  .option('--provider <name>', t('Provider scope: %s', PLAN_PROVIDERS.join(', ')))
+  .option('--reset-day <n>', t('Day of month plan resets (1-28)'), parseInteger, 1)
   .action(async (action?: string, id?: string, opts?: { format?: string; monthlyUsd?: number; credits?: number; provider?: string; resetDay?: number }) => {
     assertFormat(opts?.format ?? 'text', ['text', 'json'], 'plan')
     const mode = action ?? 'show'
     const providerOption = opts?.provider
     if (providerOption !== undefined && !isPlanProvider(providerOption)) {
-      console.error(`\n  --provider must be one of: ${PLAN_PROVIDERS.join(', ')}; got "${providerOption}".\n`)
+      console.error(`\n  ${t('--provider must be one of: %1$s; got "%2$s".', PLAN_PROVIDERS.join(', '), providerOption)}\n`)
       process.exitCode = 1
       return
     }
@@ -1896,47 +1898,47 @@ program
         return
       }
       if (plans.length === 0) {
-        console.log('\n  Plan: none')
-        console.log('  API-pricing view is active.')
-        console.log(`  Config: ${getConfigFilePath()}\n`)
+        console.log(`\n  ${t('Plan: none')}`)
+        console.log(`  ${t('API-pricing view is active.')}`)
+        console.log(`  ${t('Config: %s', getConfigFilePath())}\n`)
         return
       }
-      console.log(`\n  Plans: ${plans.length}`)
+      console.log(`\n  ${t('Plans: %d', plans.length)}`)
       for (const plan of plans) {
         console.log(`  ${plan.provider}: ${planLabel(plan)} (${plan.id})`)
-        console.log(`    Budget: ${plan.provider === 'copilot' && plan.monthlyCredits != null ? `${plan.monthlyCredits} AI Credits` : `$${plan.monthlyUsd}/month`}`)
-        console.log(`    Reset day: ${clampResetDay(plan.resetDay)}`)
-        if (plan.setAt) console.log(`    Set at: ${plan.setAt}`)
+        console.log(`    ${plan.provider === 'copilot' && plan.monthlyCredits != null ? t('Budget: %s AI Credits', plan.monthlyCredits) : t('Budget: $%s/month', plan.monthlyUsd)}`)
+        console.log(`    ${t('Reset day: %d', clampResetDay(plan.resetDay))}`)
+        if (plan.setAt) console.log(`    ${t('Set at: %s', plan.setAt)}`)
       }
-      console.log(`  Config: ${getConfigFilePath()}\n`)
+      console.log(`  ${t('Config: %s', getConfigFilePath())}\n`)
       return
     }
 
     if (mode === 'reset') {
       await clearPlan(providerOption)
       if (providerOption) {
-        console.log(`\n  Plan reset for ${providerOption}.\n`)
+        console.log(`\n  ${t('Plan reset for %s.', providerOption)}\n`)
       } else {
-        console.log('\n  Plan reset. API-pricing view is active.\n')
+        console.log(`\n  ${t('Plan reset. API-pricing view is active.')}\n`)
       }
       return
     }
 
     if (mode !== 'set') {
-      console.error('\n  Usage: codeburn plan [set <id> | reset]\n')
+      console.error(`\n  ${t('Usage: codeburn plan [set <id> | reset]')}\n`)
       process.exitCode = 1
       return
     }
 
     if (!id || !isPlanId(id)) {
-      console.error(`\n  Plan id must be one of: ${PLAN_IDS.join(', ')}; got "${id ?? ''}".\n`)
+      console.error(`\n  ${t('Plan id must be one of: %1$s; got "%2$s".', PLAN_IDS.join(', '), id ?? '')}\n`)
       process.exitCode = 1
       return
     }
 
     const resetDay = opts?.resetDay ?? 1
     if (!Number.isInteger(resetDay) || resetDay < 1 || resetDay > 28) {
-      console.error(`\n  --reset-day must be an integer from 1 to 28; got ${resetDay}.\n`)
+      console.error(`\n  ${t('--reset-day must be an integer from 1 to 28; got %s.', resetDay)}\n`)
       process.exitCode = 1
       return
     }
@@ -1944,9 +1946,9 @@ program
     if (id === 'none') {
       await clearPlan(providerOption)
       if (providerOption) {
-        console.log(`\n  Plan reset for ${providerOption}.\n`)
+        console.log(`\n  ${t('Plan reset for %s.', providerOption)}\n`)
       } else {
-        console.log('\n  Plan reset. API-pricing view is active.\n')
+        console.log(`\n  ${t('Plan reset. API-pricing view is active.')}\n`)
       }
       return
     }
@@ -1957,24 +1959,24 @@ program
       const provider = providerOption ?? 'all'
 
       if (credits !== undefined && provider !== 'copilot') {
-        console.error('\n  --credits is only valid with --provider copilot.\n')
+        console.error(`\n  ${t('--credits is only valid with --provider copilot.')}\n`)
         process.exitCode = 1
         return
       }
 
       if (provider === 'copilot') {
         if (monthlyUsdOpt !== undefined) {
-          console.error('\n  Copilot custom plans take --credits, not --monthly-usd (units mixed).\n')
+          console.error(`\n  ${t('Copilot custom plans take --credits, not --monthly-usd (units mixed).')}\n`)
           process.exitCode = 1
           return
         }
         if (credits === undefined) {
-          console.error('\n  Custom copilot plans require --credits <positive number>.\n')
+          console.error(`\n  ${t('Custom copilot plans require --credits <positive number>.')}\n`)
           process.exitCode = 1
           return
         }
         if (!Number.isFinite(credits) || credits <= 0) {
-          console.error(`\n  --credits must be a positive finite number; got ${credits}.\n`)
+          console.error(`\n  ${t('--credits must be a positive finite number; got %s.', credits)}\n`)
           process.exitCode = 1
           return
         }
@@ -1986,19 +1988,19 @@ program
           resetDay,
           setAt: new Date().toISOString(),
         })
-        console.log(`\n  Plan set to custom (${credits} AI Credits, copilot, reset day ${resetDay}).`)
-        console.log(`  Config saved to ${getConfigFilePath()}\n`)
+        console.log(`\n  ${t('Plan set to custom (%1$s AI Credits, copilot, reset day %2$d).', credits, resetDay)}`)
+        console.log(`  ${t('Config saved to %s', getConfigFilePath())}\n`)
         return
       }
 
       if (monthlyUsdOpt === undefined) {
-        console.error('\n  Custom plans require --monthly-usd <positive number>.\n')
+        console.error(`\n  ${t('Custom plans require --monthly-usd <positive number>.')}\n`)
         process.exitCode = 1
         return
       }
       const monthlyUsd = monthlyUsdOpt
       if (!Number.isFinite(monthlyUsd) || monthlyUsd <= 0) {
-        console.error(`\n  --monthly-usd must be a positive number; got ${monthlyUsdOpt}.\n`)
+        console.error(`\n  ${t('--monthly-usd must be a positive number; got %s.', monthlyUsdOpt)}\n`)
         process.exitCode = 1
         return
       }
@@ -2009,26 +2011,26 @@ program
         resetDay,
         setAt: new Date().toISOString(),
       })
-      console.log(`\n  Plan set to custom ($${monthlyUsd}/month, ${provider}, reset day ${resetDay}).`)
-      console.log(`  Config saved to ${getConfigFilePath()}\n`)
+      console.log(`\n  ${t('Plan set to custom ($%1$s/month, %2$s, reset day %3$d).', monthlyUsd, provider, resetDay)}`)
+      console.log(`  ${t('Config saved to %s', getConfigFilePath())}\n`)
       return
     }
 
     const preset = getPresetPlan(id)
     if (!preset) {
-      console.error(`\n  Unknown preset "${id}".\n`)
+      console.error(`\n  ${t('Unknown preset "%s".', id)}\n`)
       process.exitCode = 1
       return
     }
 
     if (providerOption === 'all') {
-      console.error(`\n  ${id} is a ${preset.provider} plan; omit --provider or use --provider ${preset.provider}.\n`)
+      console.error(`\n  ${t('%1$s is a %2$s plan; omit --provider or use --provider %2$s.', id, preset.provider)}\n`)
       process.exitCode = 1
       return
     }
 
     if (providerOption && providerOption !== preset.provider) {
-      console.error(`\n  ${id} is a ${preset.provider} plan; use --provider ${preset.provider} or omit --provider.\n`)
+      console.error(`\n  ${t('%1$s is a %2$s plan; use --provider %2$s or omit --provider.', id, preset.provider)}\n`)
       process.exitCode = 1
       return
     }
@@ -2038,31 +2040,31 @@ program
       resetDay,
       setAt: new Date().toISOString(),
     })
-    console.log(`\n  Plan set to ${planDisplayName(preset.id)} ($${preset.monthlyUsd}/month).`)
-    console.log(`  Provider: ${preset.provider}`)
-    console.log(`  Reset day: ${resetDay}`)
-    console.log(`  Config saved to ${getConfigFilePath()}\n`)
+    console.log(`\n  ${t('Plan set to %1$s ($%2$s/month).', planDisplayName(preset.id), preset.monthlyUsd)}`)
+    console.log(`  ${t('Provider: %s', preset.provider)}`)
+    console.log(`  ${t('Reset day: %d', resetDay)}`)
+    console.log(`  ${t('Config saved to %s', getConfigFilePath())}\n`)
   })
 
 program
   .command('optimize')
-  .description('Find token waste and get exact fixes')
-  .option('-p, --period <period>', 'Analysis period: today, week, 30days, month, all, lifetime', '30days')
-  .option('--from <date>', 'Custom range start (YYYY-MM-DD)')
-  .option('--to <date>', 'Custom range end (YYYY-MM-DD)')
-  .option('--provider <provider>', 'Filter by provider (e.g. claude, gemini, cursor, copilot)', 'all')
-  .option('--format <format>', 'Output format: text, json', 'text')
-  .option('--json', 'Output findings as JSON (alias for --format json)')
-  .option('--apply', 'Interactively apply config-class fixes (backed up, journaled, undoable)')
-  .option('--yes', 'With --apply: apply every appliable fix without prompting')
-  .option('--dry-run', 'With --apply: print the plan and exit without changing anything')
-  .option('--only <ids>', 'With --apply: restrict to a comma-separated list of finding ids')
-  .option('--auto-revert', 'Undo applied fixes that measured no reduction (never CLAUDE.md rules)')
+  .description(t('Find token waste and get exact fixes'))
+  .option('-p, --period <period>', t('Analysis period: today, week, 30days, month, all, lifetime'), '30days')
+  .option('--from <date>', t('Custom range start (YYYY-MM-DD)'))
+  .option('--to <date>', t('Custom range end (YYYY-MM-DD)'))
+  .option('--provider <provider>', t('Filter by provider (e.g. claude, gemini, cursor, copilot)'), 'all')
+  .option('--format <format>', t('Output format: text, json'), 'text')
+  .option('--json', t('Output findings as JSON (alias for --format json)'))
+  .option('--apply', t('Interactively apply config-class fixes (backed up, journaled, undoable)'))
+  .option('--yes', t('With --apply: apply every appliable fix without prompting'))
+  .option('--dry-run', t('With --apply: print the plan and exit without changing anything'))
+  .option('--only <ids>', t('With --apply: restrict to a comma-separated list of finding ids'))
+  .option('--auto-revert', t('Undo applied fixes that measured no reduction (never CLAUDE.md rules)'))
   .action(async (opts) => {
     assertProvider(opts.provider, 'optimize')
     const format = opts.json ? 'json' : opts.format
     if (opts.apply && format === 'json') {
-      process.stderr.write('codeburn optimize: --apply cannot be combined with --json\n')
+      process.stderr.write(`${t('codeburn optimize: --apply cannot be combined with --json')}\n`)
       process.exit(2)
     }
     await loadPricing()
@@ -2074,7 +2076,7 @@ program
         label = formatDateRangeLabel(opts.from, opts.to)
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
-        console.error(`\n  Error: ${message}\n`)
+        console.error(`\n  ${t('Error: %s', message)}\n`)
         process.exit(1)
       }
     } else {
@@ -2116,14 +2118,14 @@ program
 
 program
   .command('context [session]')
-  .description('Context token breakdown per session: what fills the window, by role, block type, and tool (experimental). No session argument opens an interactive browser.')
-  .option('--list', 'List recent sessions to pick from')
-  .option('--full', 'Cover the whole session history instead of the live (post-compaction) window')
-  .option('--json', 'JSON output')
-  .option('--provider <provider>', 'Session source: claude or codex', 'claude')
+  .description(t('Context token breakdown per session: what fills the window, by role, block type, and tool (experimental). No session argument opens an interactive browser.'))
+  .option('--list', t('List recent sessions to pick from'))
+  .option('--full', t('Cover the whole session history instead of the live (post-compaction) window'))
+  .option('--json', t('JSON output'))
+  .option('--provider <provider>', t('Session source: claude or codex'), 'claude')
   .action(async (session: string | undefined, opts: { list?: boolean; full?: boolean; json?: boolean; provider?: string }) => {
     if (opts.provider !== 'claude' && opts.provider !== 'codex') {
-      console.error('context: --provider must be claude or codex')
+      console.error(t('context: --provider must be claude or codex'))
       process.exitCode = 1
       return
     }
@@ -2137,20 +2139,20 @@ program
 
 program
   .command('codex-tps [session]')
-  .description('Retrospective Codex generated-tokens/sec estimate from rollout checkpoints (not live decode speed)')
-  .option('--json', 'JSON output')
-  .option('--limit <n>', 'Number of recent checkpoints to scan', parseCodexTpsLimit, 10)
-  .option('--watch <seconds>', 'Refresh continuously while Codex writes checkpoints', parseCodexTpsWatch, 0)
+  .description(t('Retrospective Codex generated-tokens/sec estimate from rollout checkpoints (not live decode speed)'))
+  .option('--json', t('JSON output'))
+  .option('--limit <n>', t('Number of recent checkpoints to scan'), parseCodexTpsLimit, 10)
+  .option('--watch <seconds>', t('Refresh continuously while Codex writes checkpoints'), parseCodexTpsWatch, 0)
   .action(async (session: string | undefined, opts: { json?: boolean; limit: number; watch: number }) => {
     const intervalMs = Math.max(0, opts.watch) * 1000
     if (opts.json && intervalMs > 0) {
-      process.stderr.write('codeburn codex-tps: --json cannot be combined with --watch; use text watch output or one-shot JSON.\n')
+      process.stderr.write(`${t('codeburn codex-tps: --json cannot be combined with --watch; use text watch output or one-shot JSON.')}\n`)
       process.exitCode = 2
       return
     }
     const provider = await getProvider('codex')
     if (!provider) {
-      process.stderr.write('codeburn codex-tps: Codex provider is unavailable.\n')
+      process.stderr.write(`${t('codeburn codex-tps: Codex provider is unavailable.')}\n`)
       process.exitCode = 1
       return
     }
@@ -2173,7 +2175,7 @@ program
           filePath = await newestCodexSession(await provider.discoverSessions())
         }
         if (!filePath) {
-          process.stderr.write('codeburn codex-tps: no Codex rollout sessions found.\n')
+          process.stderr.write(`${t('codeburn codex-tps: no Codex rollout sessions found.')}\n`)
           if (intervalMs === 0) process.exitCode = 1
           return
         }
@@ -2182,7 +2184,7 @@ program
         if (previousPath !== filePath || !throughputReader) throughputReader = new CodexThroughputReader()
         const fileInfo = await import('node:fs/promises').then(fs => fs.stat(filePath)).catch(() => null)
         if (!fileInfo) {
-          process.stderr.write(`codeburn codex-tps: session file not found: ${filePath}\n`)
+          process.stderr.write(`${t('codeburn codex-tps: session file not found: %s', filePath)}\n`)
           if (intervalMs === 0) process.exitCode = 1
           if (!session) cachedPath = undefined
           return
@@ -2194,7 +2196,7 @@ program
           process.stdout.write(JSON.stringify({ session: filePath, points, live: intervalMs > 0 }, null, 2) + '\n')
         } else {
           if (intervalMs > 0) process.stdout.write('\x1b[2J\x1b[H')
-          process.stdout.write(renderCodexThroughput(points, filePath) + (intervalMs > 0 ? '\nWatching for new Codex checkpoints... (Ctrl-C to stop)\n' : '\n'))
+          process.stdout.write(renderCodexThroughput(points, filePath) + (intervalMs > 0 ? `\n${t('Watching for new Codex checkpoints... (Ctrl-C to stop)')}\n` : '\n'))
         }
       } finally {
         refreshInFlight = false
@@ -2204,7 +2206,7 @@ program
       await render()
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      process.stderr.write(`codeburn codex-tps: refresh failed: ${message}\n`)
+      process.stderr.write(`${t('codeburn codex-tps: refresh failed: %s', message)}\n`)
       if (intervalMs === 0) {
         process.exitCode = 1
         return
@@ -2215,7 +2217,7 @@ program
         const timer = setInterval(() => {
           void render().catch(error => {
             const message = error instanceof Error ? error.message : String(error)
-            process.stderr.write(`codeburn codex-tps: refresh failed: ${message}\n`)
+            process.stderr.write(`${t('codeburn codex-tps: refresh failed: %s', message)}\n`)
           })
         }, intervalMs)
         process.once('SIGINT', () => { clearInterval(timer); resolve() })
@@ -2225,12 +2227,12 @@ program
 
 program
   .command('compare')
-  .description('Compare two AI models side-by-side')
-  .option('-p, --period <period>', 'Analysis period: today, week, 30days, month, all, lifetime', 'all')
-  .option('--provider <provider>', 'Filter by provider (e.g. claude, gemini, cursor, copilot)', 'all')
-  .option('--format <format>', 'Output format: tui, json', 'tui')
-  .option('--model-a <model>', 'First model to compare')
-  .option('--model-b <model>', 'Second model to compare')
+  .description(t('Compare two AI models side-by-side'))
+  .option('-p, --period <period>', t('Analysis period: today, week, 30days, month, all, lifetime'), 'all')
+  .option('--provider <provider>', t('Filter by provider (e.g. claude, gemini, cursor, copilot)'), 'all')
+  .option('--format <format>', t('Output format: tui, json'), 'tui')
+  .option('--model-a <model>', t('First model to compare'))
+  .option('--model-b <model>', t('Second model to compare'))
   .action(async (opts) => {
     assertProvider(opts.provider, 'compare')
     assertFormat(opts.format, ['tui', 'json'], 'compare')
@@ -2257,17 +2259,17 @@ program
         return
       }
       if (!opts.modelA || !opts.modelB) {
-        process.stderr.write('codeburn compare: --model-a and --model-b must be provided together.\n')
+        process.stderr.write(`${t('codeburn compare: --model-a and --model-b must be provided together.')}\n`)
         process.exit(1)
       }
       const modelA = findModelStat(models, opts.modelA)
       const modelB = findModelStat(models, opts.modelB)
       if (!modelA) {
-        process.stderr.write(`codeburn compare: model not found: "${opts.modelA}".\n`)
+        process.stderr.write(`${t('codeburn compare: model not found: "%s".', opts.modelA)}\n`)
         process.exit(1)
       }
       if (!modelB) {
-        process.stderr.write(`codeburn compare: model not found: "${opts.modelB}".\n`)
+        process.stderr.write(`${t('codeburn compare: model not found: "%s".', opts.modelB)}\n`)
         process.exit(1)
       }
       process.stdout.write(renderCompareJson(buildCompareJson(projects, modelA, modelB, label, opts.provider)) + '\n')
@@ -2275,7 +2277,7 @@ program
     }
     if (opts.modelA || opts.modelB) {
       if (!opts.modelA || !opts.modelB) {
-        process.stderr.write('codeburn compare: --model-a and --model-b must be provided together.\n')
+        process.stderr.write(`${t('codeburn compare: --model-a and --model-b must be provided together.')}\n`)
         process.exit(1)
       }
     }
@@ -2284,12 +2286,12 @@ program
 
 program
   .command('audit')
-  .description("Token audit: raw provider token fields vs codeburn's displayed totals and cost derivation")
-  .option('-p, --period <period>', 'Analysis period: today, week, 30days, month, all, lifetime', '30days')
-  .option('--from <date>', 'Custom range start (YYYY-MM-DD)')
-  .option('--to <date>', 'Custom range end (YYYY-MM-DD)')
-  .option('--provider <provider>', 'Filter by provider (e.g. claude, codex, cursor)', 'all')
-  .option('--format <format>', 'Output format: table, json', 'table')
+  .description(t("Token audit: raw provider token fields vs codeburn's displayed totals and cost derivation"))
+  .option('-p, --period <period>', t('Analysis period: today, week, 30days, month, all, lifetime'), '30days')
+  .option('--from <date>', t('Custom range start (YYYY-MM-DD)'))
+  .option('--to <date>', t('Custom range end (YYYY-MM-DD)'))
+  .option('--provider <provider>', t('Filter by provider (e.g. claude, codex, cursor)'), 'all')
+  .option('--format <format>', t('Output format: table, json'), 'table')
   .action(async (opts) => {
     assertProvider(opts.provider, 'audit')
     const { aggregateAudit, renderAuditTable, renderAuditJson } = await import('./audit-report.js')
@@ -2299,7 +2301,7 @@ program
     if (opts.from || opts.to) {
       const customRange = parseDateRangeFlags(opts.from, opts.to)
       if (!customRange) {
-        process.stderr.write('codeburn: --from and --to must be valid YYYY-MM-DD dates\n')
+        process.stderr.write(`${t('codeburn: --from and --to must be valid YYYY-MM-DD dates')}\n`)
         process.exit(1)
       }
       range = customRange
@@ -2315,7 +2317,7 @@ program
       process.stdout.write(renderAuditJson(rows) + '\n')
     } else {
       if (rows.length === 0) {
-        process.stdout.write('No model usage found for the selected period.\n')
+        process.stdout.write(`${t('No model usage found for the selected period.')}\n`)
         return
       }
       process.stdout.write(renderAuditTable(rows) + '\n')
@@ -2324,23 +2326,23 @@ program
 
 program
   .command('models')
-  .description('Per-model token + cost table, optionally exploded by task type or agent')
-  .option('-p, --period <period>', 'Analysis period: today, week, 30days, month, all, lifetime', '30days')
-  .option('--from <date>', 'Custom range start (YYYY-MM-DD)')
-  .option('--to <date>', 'Custom range end (YYYY-MM-DD)')
-  .option('--provider <provider>', 'Filter by provider (e.g. claude, codex, cursor)', 'all')
-  .option('--task <category>', 'Filter to one task type (e.g. feature, debugging, refactoring)')
-  .option('--by-task', 'One row per (provider, model, task) instead of one row per (provider, model)')
-  .option('--by-agent', 'One row per (provider, model, agent) instead of one row per (provider, model). Claude subagent transcripts only; other providers and main sessions bucket under "main"')
-  .option('--top <n>', 'Show only the top N rows', (v: string) => parseInt(v, 10))
-  .option('--min-cost <usd>', 'Hide rows below this cost threshold', (v: string) => parseFloat(v))
-  .option('--unpriced', 'Show only models with usage that currently price at $0')
-  .option('--no-totals', 'Suppress the footer totals row')
-  .option('--format <format>', 'Output format: table, markdown, json, csv', 'table')
+  .description(t('Per-model token + cost table, optionally exploded by task type or agent'))
+  .option('-p, --period <period>', t('Analysis period: today, week, 30days, month, all, lifetime'), '30days')
+  .option('--from <date>', t('Custom range start (YYYY-MM-DD)'))
+  .option('--to <date>', t('Custom range end (YYYY-MM-DD)'))
+  .option('--provider <provider>', t('Filter by provider (e.g. claude, codex, cursor)'), 'all')
+  .option('--task <category>', t('Filter to one task type (e.g. feature, debugging, refactoring)'))
+  .option('--by-task', t('One row per (provider, model, task) instead of one row per (provider, model)'))
+  .option('--by-agent', t('One row per (provider, model, agent) instead of one row per (provider, model). Claude subagent transcripts only; other providers and main sessions bucket under "main"'))
+  .option('--top <n>', t('Show only the top N rows'), (v: string) => parseInt(v, 10))
+  .option('--min-cost <usd>', t('Hide rows below this cost threshold'), (v: string) => parseFloat(v))
+  .option('--unpriced', t('Show only models with usage that currently price at $0'))
+  .option('--no-totals', t('Suppress the footer totals row'))
+  .option('--format <format>', t('Output format: table, markdown, json, csv'), 'table')
   .action(async (opts) => {
     assertProvider(opts.provider, 'models')
     if (opts.byTask && opts.byAgent) {
-      process.stderr.write('codeburn: --by-task and --by-agent cannot be combined. Pick one breakdown.\n')
+      process.stderr.write(`${t('codeburn: --by-task and --by-agent cannot be combined. Pick one breakdown.')}\n`)
       process.exit(1)
     }
     const { aggregateModels, renderTable, renderMarkdown, renderJson, renderCsv } = await import('./models-report.js')
@@ -2350,7 +2352,7 @@ program
     if (opts.from || opts.to) {
       const customRange = parseDateRangeFlags(opts.from, opts.to)
       if (!customRange) {
-        process.stderr.write('codeburn: --from and --to must be valid YYYY-MM-DD dates\n')
+        process.stderr.write(`${t('codeburn: --from and --to must be valid YYYY-MM-DD dates')}\n`)
         process.exit(1)
       }
       range = customRange
@@ -2393,8 +2395,8 @@ program
     const fmt = (opts.format ?? 'table').toLowerCase()
     if (rows.length === 0 && (fmt === 'table' || fmt === 'markdown')) {
       process.stdout.write(opts.unpriced
-        ? 'No unpriced models found for the selected period.\n'
-        : 'No model usage found for the selected period.\n')
+        ? `${t('No unpriced models found for the selected period.')}\n`
+        : `${t('No model usage found for the selected period.')}\n`)
       return
     }
     // The friendly name is useless for `model-alias`, which keys on the raw ID.
@@ -2414,22 +2416,22 @@ program
       // is correctly $0, and mapping it onto another model's rate invents spend.
       if (opts.unpriced) process.stdout.write(unpricedModelHint() + '\n')
     } else {
-      process.stderr.write(`codeburn: unknown --format "${opts.format}". Choose table, markdown, json, or csv.\n`)
+      process.stderr.write(`${t('codeburn: unknown --format "%s". Choose table, markdown, json, or csv.', opts.format)}\n`)
       process.exit(1)
     }
   })
 
 program
   .command('sessions')
-  .description('Full per-session usage report')
-  .option('-p, --period <period>', 'Analysis period: today, week, 30days, month, all, lifetime', '30days')
-  .option('--from <date>', 'Custom range start (YYYY-MM-DD)')
-  .option('--to <date>', 'Custom range end (YYYY-MM-DD)')
-  .option('--provider <provider>', 'Filter by provider (e.g. claude, codex, cursor)', 'all')
-  .option('--format <format>', 'Output format: table, json', 'table')
-  .option('--by-pr', 'Group spend by the pull requests each session referenced')
-  .option('--by-work-unit', 'Group sessions into provider-recorded work units: one row per orchestration root with its delegated children folded beneath')
-  .option('--no-pager', 'Print the complete table directly instead of opening the interactive browser')
+  .description(t('Full per-session usage report'))
+  .option('-p, --period <period>', t('Analysis period: today, week, 30days, month, all, lifetime'), '30days')
+  .option('--from <date>', t('Custom range start (YYYY-MM-DD)'))
+  .option('--to <date>', t('Custom range end (YYYY-MM-DD)'))
+  .option('--provider <provider>', t('Filter by provider (e.g. claude, codex, cursor)'), 'all')
+  .option('--format <format>', t('Output format: table, json'), 'table')
+  .option('--by-pr', t('Group spend by the pull requests each session referenced'))
+  .option('--by-work-unit', t('Group sessions into provider-recorded work units: one row per orchestration root with its delegated children folded beneath'))
+  .option('--no-pager', t('Print the complete table directly instead of opening the interactive browser'))
   .action(async (opts) => {
     assertProvider(opts.provider, 'sessions')
     assertFormat(opts.format, ['table', 'json'], 'sessions')
@@ -2442,7 +2444,7 @@ program
     if (opts.from || opts.to) {
       const customRange = parseDateRangeFlags(opts.from, opts.to)
       if (!customRange) {
-        process.stderr.write('codeburn: --from and --to must be valid YYYY-MM-DD dates\n')
+        process.stderr.write(`${t('codeburn: --from and --to must be valid YYYY-MM-DD dates')}\n`)
         process.exit(1)
       }
       range = customRange
@@ -2458,7 +2460,7 @@ program
         return
       }
       if (prRows.length === 0) {
-        process.stdout.write('No sessions with captured PR links in this period. Links are captured as sessions are parsed; older transcripts gain them on their next re-parse.\n')
+        process.stdout.write(`${t('No sessions with captured PR links in this period. Links are captured as sessions are parsed; older transcripts gain them on their next re-parse.')}\n`)
         return
       }
       const { unattributedCost, sessions, subagentSessions } = totals
@@ -2467,14 +2469,14 @@ program
         models.length === 0 ? '' : models.slice(0, 2).join(', ') + (models.length > 2 ? ` +${models.length - 2}` : '')
       const table = renderTextTable(
         [
-          { header: 'PR' },
-          { header: 'Cost', right: true },
-          { header: 'Saved', right: true },
-          { header: 'Sessions', right: true },
-          { header: 'Calls', right: true },
-          { header: 'Models' },
-          { header: 'First' },
-          { header: 'Last' },
+          { header: t('PR') },
+          { header: t('Cost'), right: true },
+          { header: t('Saved'), right: true },
+          { header: t('Sessions'), right: true },
+          { header: t('Calls'), right: true },
+          { header: t('Models') },
+          { header: t('First') },
+          { header: t('Last') },
         ],
         prRows.map(r => [
           r.label,
@@ -2491,12 +2493,18 @@ program
       // exact float sum), so the visible column adds up to the stated total.
       const shownAttributed = prRows.reduce((sum, r) => sum + Number(r.cost.toFixed(2)), 0)
       const approxNote = prRows.some(r => r.approx)
-        ? ' ~ marks rows estimated from a whole-session even split (transcript expired before per-turn capture).'
+        ? ' ' + t('~ marks rows estimated from a whole-session even split (transcript expired before per-turn capture).')
         : ''
       const subagentNote = subagentSessions > 0
-        ? ` + ${subagentSessions} folded-in subagent run${subagentSessions === 1 ? '' : 's'}`
+        ? ' ' + tn('+ %d folded-in subagent run', '+ %d folded-in subagent runs', subagentSessions)
         : ''
-      process.stdout.write(table + `\nRows sum to $${shownAttributed.toFixed(2)} attributed across ${sessions} PR-linked session${sessions === 1 ? '' : 's'}${subagentNote}. $${unattributedCost.toFixed(2)} of that spend was not tied to a specific PR.${approxNote}\n`)
+      const attributedNote = tn(
+        'Rows sum to $%1$s attributed across %2$d PR-linked session%3$s.',
+        'Rows sum to $%1$s attributed across %2$d PR-linked sessions%3$s.',
+        sessions,
+        shownAttributed.toFixed(2), sessions, subagentNote,
+      )
+      process.stdout.write(table + `\n${attributedNote} ${t('$%s of that spend was not tied to a specific PR.', unattributedCost.toFixed(2))}${approxNote}\n`)
       return
     }
     const rows = aggregateSessions(projects)
@@ -2530,10 +2538,10 @@ program
 
 program
   .command('yield')
-  .description('Track which AI spend shipped to main vs reverted/abandoned (experimental)')
-  .option('-p, --period <period>', 'Analysis period: today, week, 30days, month, all, lifetime', 'week')
-  .option('--provider <provider>', 'Filter by provider (e.g. claude, codex, cursor)', 'all')
-  .option('--format <format>', 'Output format: text, json', 'text')
+  .description(t('Track which AI spend shipped to main vs reverted/abandoned (experimental)'))
+  .option('-p, --period <period>', t('Analysis period: today, week, 30days, month, all, lifetime'), 'week')
+  .option('--provider <provider>', t('Filter by provider (e.g. claude, codex, cursor)'), 'all')
+  .option('--format <format>', t('Output format: text, json'), 'text')
   .action(async (opts) => {
     assertFormat(opts.format, ['text', 'json'], 'yield')
     assertProvider(opts.provider, 'yield')
@@ -2541,7 +2549,7 @@ program
     await loadPricing()
     const { range, label } = getDateRange(opts.period)
     if (opts.format !== 'json') {
-      console.log(`\n  Analyzing yield for ${label}...\n`)
+      console.log(`\n  ${t('Analyzing yield for %s...', periodLabelForDisplay(label))}\n`)
     }
     const summary = await computeYield(range, process.cwd(), opts.provider)
     if (opts.format === 'json') {
@@ -2553,12 +2561,12 @@ program
 
 program
   .command('spend')
-  .description('Emit model x project spend flow data')
-  .option('-p, --period <period>', 'Analysis period: today, week, 30days, month, all, lifetime', '30days')
-  .option('--from <date>', 'Custom range start (YYYY-MM-DD)')
-  .option('--to <date>', 'Custom range end (YYYY-MM-DD)')
-  .option('--provider <provider>', 'Filter by provider (e.g. claude, codex, cursor)', 'all')
-  .option('--format <format>', 'Output format: flow-json', 'flow-json')
+  .description(t('Emit model x project spend flow data'))
+  .option('-p, --period <period>', t('Analysis period: today, week, 30days, month, all, lifetime'), '30days')
+  .option('--from <date>', t('Custom range start (YYYY-MM-DD)'))
+  .option('--to <date>', t('Custom range end (YYYY-MM-DD)'))
+  .option('--provider <provider>', t('Filter by provider (e.g. claude, codex, cursor)'), 'all')
+  .option('--format <format>', t('Output format: flow-json'), 'flow-json')
   .action(async (opts) => {
     assertFormat(opts.format, ['flow-json'], 'spend')
     assertProvider(opts.provider, 'spend')
@@ -2571,7 +2579,7 @@ program
         range = parseDateRangeFlags(opts.from, opts.to)!
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
-        console.error(`\n  Error: ${message}\n`)
+        console.error(`\n  ${t('Error: %s', message)}\n`)
         process.exit(1)
       }
     } else {
@@ -2583,47 +2591,47 @@ program
 
 program
   .command('antigravity-hook')
-  .description('Install or remove exact Antigravity CLI usage capture')
-  .argument('<action>', 'install or uninstall')
-  .option('--force', 'Replace an existing custom Antigravity CLI statusLine command')
+  .description(t('Install or remove exact Antigravity CLI usage capture'))
+  .argument('<action>', t('install or uninstall'))
+  .option('--force', t('Replace an existing custom Antigravity CLI statusLine command'))
   .action(async (action: string, opts: { force?: boolean }) => {
     try {
       if (action === 'install') {
         const result = await installAntigravityStatusLineHook(!!opts.force)
         const headline = result === 'already-installed'
-          ? 'Antigravity CLI usage capture is already installed.'
-          : 'Antigravity CLI usage capture installed.'
-        console.log(`\n  ${headline}\n  Note: this captures CLI (agy) sessions only. IDE sessions are read from .db files automatically.\n`)
+          ? t('Antigravity CLI usage capture is already installed.')
+          : t('Antigravity CLI usage capture installed.')
+        console.log(`\n  ${headline}\n  ${t('Note: this captures CLI (agy) sessions only. IDE sessions are read from .db files automatically.')}\n`)
         return
       }
       if (action === 'uninstall') {
         const result = await uninstallAntigravityStatusLineHook()
         console.log(result === 'not-installed'
-          ? '\n  Antigravity CLI usage capture is not installed.\n'
+          ? `\n  ${t('Antigravity CLI usage capture is not installed.')}\n`
           : result === 'restored'
-            ? '\n  Antigravity CLI usage capture removed; previous statusLine restored.\n'
-          : '\n  Antigravity CLI usage capture removed.\n')
+            ? `\n  ${t('Antigravity CLI usage capture removed; previous statusLine restored.')}\n`
+          : `\n  ${t('Antigravity CLI usage capture removed.')}\n`)
         return
       }
-      console.error('\n  Usage: codeburn antigravity-hook <install|uninstall>\n')
+      console.error(`\n  ${t('Usage: codeburn antigravity-hook <install|uninstall>')}\n`)
       process.exit(1)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
-      console.error(`\n  Antigravity hook failed: ${message}\n`)
+      console.error(`\n  ${t('Antigravity hook failed: %s', message)}\n`)
       process.exit(1)
     }
   })
 
 program
   .command('agy-statusline-hook', { hidden: true })
-  .description('Internal Antigravity CLI statusLine hook')
+  .description(t('Internal Antigravity CLI statusLine hook'))
   .action(async () => {
     await runAgyStatusLineHook()
   })
 
 program
   .command('mcp')
-  .description('Run a Model Context Protocol server (stdio) exposing usage + savings to AI agents')
+  .description(t('Run a Model Context Protocol server (stdio) exposing usage + savings to AI agents'))
   .action(async () => {
     // stdout MUST carry only JSON-RPC; route stray logs to stderr.
     // NOTE: only console.log is guarded here. process.stdout.write is left intact
@@ -2635,10 +2643,10 @@ program
 
 program
   .command('doctor')
-  .description('Per-provider detection status: paths probed, sessions found, parse health (diagnose empty or wrong numbers)')
-  .option('--provider <provider>', 'Diagnose a single provider (e.g. claude, codex, opencode)', 'all')
-  .option('--json', 'Output machine-readable JSON')
-  .option('--no-color', 'Disable ANSI colors')
+  .description(t('Per-provider detection status: paths probed, sessions found, parse health (diagnose empty or wrong numbers)'))
+  .option('--provider <provider>', t('Diagnose a single provider (e.g. claude, codex, opencode)'), 'all')
+  .option('--json', t('Output machine-readable JSON'))
+  .option('--no-color', t('Disable ANSI colors'))
   .action(async (opts) => {
     assertProvider(opts.provider, 'doctor')
     const { collectDoctorReport, renderDoctorTable, renderDoctorJson } = await import('./doctor.js')
@@ -2657,8 +2665,8 @@ registerPluginCommands(program)
 
 program
   .command('serve')
-  .description('Run a resident query server over stdio (used by the desktop app to avoid per-fetch CLI startup cost)')
-  .option('--stdio', 'Serve JSON requests over stdin/stdout (the only mode)')
+  .description(t('Run a resident query server over stdio (used by the desktop app to avoid per-fetch CLI startup cost)'))
+  .option('--stdio', t('Serve JSON requests over stdin/stdout (the only mode)'))
   .action(() => {
     // Never reached: the serve entry is dispatched before commander parses,
     // because serving needs the buildProgram factory itself. Registered so
@@ -2681,6 +2689,12 @@ if (process.argv[2] === 'serve') {
   // this child running as an orphan for as long as the machine is up.
   hardExit(0)
 } else {
+  // Command/option help strings are translated when the program is BUILT, and
+  // commander renders `--help` before any action runs — so the `preAction`
+  // hook's setLanguage would come too late for help text. Resolve the language
+  // once up front (env > stored config > system locale, same order as the
+  // hook); the hook still re-applies it for the command output itself.
+  setLanguage(resolveLanguage({ configured: (await readConfig()).lang }))
   const program = buildProgram()
   await registerLoadedPluginCommands(program)
   program.parse()

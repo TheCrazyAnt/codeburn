@@ -1,3 +1,5 @@
+import { applyServerLanguage } from './i18n'
+
 export type Period = 'today' | 'week' | '30days' | 'month' | 'all' | 'lifetime'
 
 export type ModelDay = {
@@ -75,6 +77,10 @@ export type Payload = {
   // this, and only it may answer partially. `complete: false` means the totals
   // cover the files indexed so far. Absence must be read as complete.
   hydration?: { complete: boolean; indexedFiles: number; totalFiles: number }
+  // The UI language `codeburn lang` resolved, so the dashboard follows the CLI
+  // instead of guessing. Optional: a device on a version that predates the
+  // field sends nothing, and the browser locale decides.
+  lang?: string
   current: Current
   history: { daily: DailyEntry[]; timeline?: GranularHistory }
 }
@@ -82,7 +88,9 @@ export type Payload = {
 export async function fetchUsage(period: Period, provider: string): Promise<Payload> {
   const res = await fetch(`/api/usage?period=${encodeURIComponent(period)}&provider=${encodeURIComponent(provider)}`)
   if (!res.ok) throw new Error(`Request failed (${res.status})`)
-  return res.json() as Promise<Payload>
+  const payload = (await res.json()) as Payload
+  applyServerLanguage(payload.lang)
+  return payload
 }
 
 export type DeviceUsage = {
@@ -130,6 +138,7 @@ function normalizePayload(p?: Payload): Payload | undefined {
   return {
     generated: p.generated,
     ...(p.hydration ? { hydration: p.hydration } : {}),
+    ...(p.lang ? { lang: p.lang } : {}),
     current: {
       label: c.label ?? '',
       cost: c.cost ?? 0,
@@ -194,7 +203,11 @@ export async function fetchDevices(period: Period, provider: string): Promise<{ 
   const res = await fetch(`/api/devices?period=${encodeURIComponent(period)}&provider=${encodeURIComponent(provider)}`)
   if (!res.ok) throw new Error(`Request failed (${res.status})`)
   const data = (await res.json()) as { devices: DeviceUsage[] }
-  return { devices: (data.devices ?? []).map((d) => ({ ...d, payload: normalizePayload(d.payload) })) }
+  const devices = (data.devices ?? []).map((d) => ({ ...d, payload: normalizePayload(d.payload) }))
+  // This machine decides the language; a peer's `lang` is its own setting and
+  // must never re-render your dashboard in another language.
+  applyServerLanguage(devices.find((d) => d.local)?.payload?.lang)
+  return { devices }
 }
 
 // Keys map 1:1 to the CLI's --period values (src/cli-date.ts). Period windows

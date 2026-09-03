@@ -4,6 +4,8 @@ import { existsSync } from 'fs'
 import { join } from 'path'
 import chalk from 'chalk'
 
+import { t, tn } from '../i18n.js'
+
 type Scope = { global?: boolean; project?: string }
 
 function readStdin(): Promise<string> {
@@ -19,7 +21,7 @@ function readStdin(): Promise<string> {
 }
 
 function usd(n: number | null): string {
-  return n === null ? 'off' : `$${n}`
+  return n === null ? t('off') : `$${n}`
 }
 
 async function refreshFlags(): Promise<number> {
@@ -50,23 +52,23 @@ async function doInstall(scope: Scope, statusline: boolean): Promise<void> {
       if (baseline) built.plan.baseline = baseline
     } catch { /* baseline is optional */ }
     const record = await runAction(built.plan)
-    console.log(`  Installed ${chalk.bold(shortId(record.id))}  ${built.plan.description}`)
-    console.log(chalk.dim(`    Undo anytime: codeburn act undo ${shortId(record.id)}`))
+    console.log('  ' + t('Installed %s  %s', chalk.bold(shortId(record.id)), built.plan.description))
+    console.log(chalk.dim('    ' + t('Undo anytime: codeburn act undo %s', shortId(record.id))))
   } else {
-    console.log(chalk.dim(`  ${path}: nothing to change.`))
+    console.log(chalk.dim('  ' + t('%s: nothing to change.', path)))
   }
 
   if (!existsSync(guardConfigPath())) {
     await writeGuardConfig({ ...DEFAULT_GUARD_CONFIG, updatedAt: new Date().toISOString() })
     const c = await readGuardConfig()
-    console.log(chalk.dim(`  Wrote guard.json (soft ${usd(c.softUSD)}, hard ${usd(c.hardUSD)}, checkpoint ${usd(c.checkpointUSD)}).`))
+    console.log(chalk.dim('  ' + t('Wrote guard.json (soft %s, hard %s, checkpoint %s).', usd(c.softUSD), usd(c.hardUSD), usd(c.checkpointUSD))))
   }
 
   try {
     const flagged = await refreshFlags()
-    console.log(chalk.dim(`  Flagged ${flagged} project${flagged === 1 ? '' : 's'} for session openers.`))
+    console.log(chalk.dim('  ' + tn('Flagged %d project for session openers.', 'Flagged %d projects for session openers.', flagged)))
   } catch (e) {
-    console.log(chalk.yellow(`  ! could not compute session-opener flags: ${e instanceof Error ? e.message : String(e)}`))
+    console.log(chalk.yellow('  ! ' + t('could not compute session-opener flags: %s', e instanceof Error ? e.message : String(e))))
   }
 }
 
@@ -80,8 +82,8 @@ async function doUninstall(scope: Scope): Promise<void> {
   for (const note of built.notes) console.log(chalk.dim(`  ${note}`))
   if (built.plan) {
     const record = await runAction(built.plan)
-    console.log(`  Uninstalled ${chalk.bold(shortId(record.id))}  ${built.plan.description}`)
-    console.log(chalk.dim(`    Undo anytime: codeburn act undo ${shortId(record.id)}`))
+    console.log('  ' + t('Uninstalled %s  %s', chalk.bold(shortId(record.id)), built.plan.description))
+    console.log(chalk.dim('    ' + t('Undo anytime: codeburn act undo %s', shortId(record.id))))
   }
 }
 
@@ -92,33 +94,39 @@ async function doStatus(): Promise<void> {
 
   const config = await readGuardConfig()
   console.log(chalk.bold('\n  codeburn guard'))
-  console.log(`    soft cap:   ${usd(config.softUSD)}`)
-  console.log(`    hard cap:   ${usd(config.hardUSD)}`)
-  console.log(`    checkpoint: ${usd(config.checkpointUSD)}`)
-  console.log(`    openers:    ${config.openerEnabled ? 'on' : 'off'}`)
+  console.log('    ' + t('soft cap:   %s', usd(config.softUSD)))
+  console.log('    ' + t('hard cap:   %s', usd(config.hardUSD)))
+  console.log('    ' + t('checkpoint: %s', usd(config.checkpointUSD)))
+  console.log('    ' + t('openers:    %s', config.openerEnabled ? t('on') : t('off')))
 
   const locations = [
-    { label: 'global', path: settingsPathFor({ global: true }) },
-    { label: 'project', path: settingsPathFor({ cwd: process.cwd() }) },
+    { label: t('global'), path: settingsPathFor({ global: true }) },
+    { label: t('project'), path: settingsPathFor({ cwd: process.cwd() }) },
   ]
   const found = locations
     .map(l => ({ ...l, info: inspectInstall(l.path) }))
     .filter(l => l.info.hooks.length > 0 || l.info.statusline)
   if (found.length === 0) {
-    console.log('    installed:  nowhere (run: codeburn guard install)')
+    console.log('    ' + t('installed:  nowhere (run: codeburn guard install)'))
   } else {
     for (const l of found) {
       const bits = [...new Set(l.info.hooks)].join(', ')
-      console.log(`    installed:  ${l.label} ${l.path} [${bits}${l.info.statusline ? ', statusline' : ''}]`)
+      console.log('    ' + t('installed:  %s %s [%s]', l.label, l.path, `${bits}${l.info.statusline ? ', statusline' : ''}`))
     }
   }
 
   const flags = await readFlags()
   if (!flags) {
-    console.log('    flags:      none (run: codeburn guard refresh)')
+    console.log('    ' + t('flags:      none (run: codeburn guard refresh)'))
   } else {
     const ageDays = flagsAgeMs(flags) / 86_400_000
-    console.log(`    flags:      ${flags.projects.length} project${flags.projects.length === 1 ? '' : 's'}, ${ageDays.toFixed(1)}d old`)
+    console.log('    ' + tn(
+      'flags:      %d project, %sd old',
+      'flags:      %d projects, %sd old',
+      flags.projects.length,
+      flags.projects.length,
+      ageDays.toFixed(1),
+    ))
   }
   console.log()
 }
@@ -144,25 +152,25 @@ async function doAllow(sessionId: string | undefined): Promise<void> {
     id = newest.id
   }
   if (!id) {
-    console.error('  No active guard session found. Pass the session id: codeburn guard allow <session-id>.')
+    console.error('  ' + t('No active guard session found. Pass the session id: codeburn guard allow <session-id>.'))
     process.exitCode = 1
     return
   }
   await writeAllow(id)
-  console.log(`  Lifted the guard hard cap for session ${id} (this session only).`)
+  console.log('  ' + t('Lifted the guard hard cap for session %s (this session only).', id))
 }
 
 export function registerGuardCommands(program: Command): void {
   const guard = program
     .command('guard')
-    .description('Opt-in, removable session-time hooks for Claude Code (budget caps, openers, yield checkpoint)')
+    .description(t('Opt-in, removable session-time hooks for Claude Code (budget caps, openers, yield checkpoint)'))
 
   guard
     .command('install')
-    .description('Install the guard hooks into Claude Code settings (default: this project)')
-    .option('--global', 'Install into ~/.claude/settings.json instead of the project')
-    .option('--project <path>', 'Install into <path>/.claude/settings.json')
-    .option('--statusline', 'Also configure the guard statusline (skipped if one already exists)')
+    .description(t('Install the guard hooks into Claude Code settings (default: this project)'))
+    .option('--global', t('Install into ~/.claude/settings.json instead of the project'))
+    .option('--project <path>', t('Install into <path>/.claude/settings.json'))
+    .option('--statusline', t('Also configure the guard statusline (skipped if one already exists)'))
     .action(async (opts: { global?: boolean; project?: string; statusline?: boolean }) => {
       try {
         await doInstall({ global: opts.global, project: opts.project }, !!opts.statusline)
@@ -174,9 +182,9 @@ export function registerGuardCommands(program: Command): void {
 
   guard
     .command('uninstall')
-    .description('Remove the guard hooks, leaving any user hooks untouched')
-    .option('--global', 'Uninstall from ~/.claude/settings.json')
-    .option('--project <path>', 'Uninstall from <path>/.claude/settings.json')
+    .description(t('Remove the guard hooks, leaving any user hooks untouched'))
+    .option('--global', t('Uninstall from ~/.claude/settings.json'))
+    .option('--project <path>', t('Uninstall from <path>/.claude/settings.json'))
     .action(async (opts: { global?: boolean; project?: string }) => {
       try {
         await doUninstall({ global: opts.global, project: opts.project })
@@ -188,16 +196,16 @@ export function registerGuardCommands(program: Command): void {
 
   guard
     .command('status')
-    .description('Show resolved guard config, install locations, and the flag list')
+    .description(t('Show resolved guard config, install locations, and the flag list'))
     .action(async () => { await doStatus() })
 
   guard
     .command('refresh')
-    .description('Recompute the per-project session-opener flag list from optimize signals')
+    .description(t('Recompute the per-project session-opener flag list from optimize signals'))
     .action(async () => {
       try {
         const n = await refreshFlags()
-        console.log(`  Flagged ${n} project${n === 1 ? '' : 's'} for session openers.`)
+        console.log('  ' + tn('Flagged %d project for session openers.', 'Flagged %d projects for session openers.', n))
       } catch (e) {
         console.error(`  ${e instanceof Error ? e.message : String(e)}`)
         process.exitCode = 1
@@ -206,12 +214,12 @@ export function registerGuardCommands(program: Command): void {
 
   guard
     .command('allow [sessionId]')
-    .description('Lift the hard budget cap for the current (or given) session')
+    .description(t('Lift the hard budget cap for the current (or given) session'))
     .action(async (sessionId: string | undefined) => { await doAllow(sessionId) })
 
   guard
     .command('hook <event>')
-    .description('Internal: Claude Code invokes this with the hook payload on stdin')
+    .description(t('Internal: Claude Code invokes this with the hook payload on stdin'))
     .action(async (event: string) => {
       const { runGuardHook } = await import('./hooks.js')
       const out = await runGuardHook(event, await readStdin())
@@ -220,7 +228,7 @@ export function registerGuardCommands(program: Command): void {
 
   guard
     .command('statusline')
-    .description('Internal: Claude Code statusline command; prints one line')
+    .description(t('Internal: Claude Code statusline command; prints one line'))
     .action(async () => {
       const { runGuardStatusline } = await import('./hooks.js')
       const out = await runGuardStatusline(await readStdin())

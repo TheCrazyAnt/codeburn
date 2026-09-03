@@ -3,7 +3,12 @@ import { createRoot } from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 import { App } from './App'
+import { initLanguage, t } from './lib/i18n'
 import './index.css'
+
+// Adopt the language the server injected with the bootstrap payload before the
+// first render, so the dashboard never paints English and then flips.
+initLanguage()
 
 // Last-resort guard: a render error (e.g. an unexpected payload from a peer on
 // a different version) shows a recoverable message instead of a blank page.
@@ -16,14 +21,14 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
     if (this.state.error) {
       return (
         <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-outer-background p-8 text-center">
-          <p className="text-sm text-foreground">Something went wrong rendering the dashboard.</p>
+          <p className="text-sm text-foreground">{t('Something went wrong rendering the dashboard.')}</p>
           <p className="max-w-md text-xs text-tertiary-foreground">{String(this.state.error.message)}</p>
           <button
             type="button"
             onClick={() => location.reload()}
             className="rounded-md border border-border bg-card px-3 py-1.5 text-xs text-foreground hover:bg-interactive-secondary"
           >
-            Reload
+            {t('Reload')}
           </button>
         </div>
       )

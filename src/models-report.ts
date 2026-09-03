@@ -3,7 +3,8 @@ import stripAnsi from 'strip-ansi'
 
 import { isBehavioralCall } from './behavioral-weight.js'
 import { codexCredits } from './codex-credits.js'
-import { formatCost, formatTokens } from './format.js'
+import { displayWidth, formatCost, formatTokens } from './format.js'
+import { t } from './i18n.js'
 import { billableOutputTokens, fallbackRawModelDisplayName, getShortModelName, resolveCanonicalModelId, sanitizeModelForDisplay } from './models.js'
 import { getProvider } from './providers/index.js'
 import { CATEGORY_LABELS, type ProjectSummary, type TaskCategory } from './types.js'
@@ -315,8 +316,10 @@ export async function aggregateModels(projects: ProjectSummary[], opts: Aggregat
   return filtered
 }
 
+// Terminal cells, not characters: a translated (CJK) header is twice as wide
+// per character and would otherwise push every column to its right out of line.
 function visibleLength(text: string): number {
-  return stripAnsi(text).length
+  return displayWidth(stripAnsi(text))
 }
 
 function pad(text: string, width: number, align: 'left' | 'right' = 'left'): string {
@@ -368,8 +371,8 @@ type TableRenderOptions = {
 /// The third column reuses the `task` slot for all three modes: 'Top Task' in
 /// the default view, 'Task' under byTask, 'Agent' under byAgent.
 function thirdColumnHeader(byTask: boolean, byAgent: boolean): string {
-  if (byAgent) return 'Agent'
-  return byTask ? 'Task' : 'Top Task'
+  if (byAgent) return t('Agent')
+  return byTask ? t('Task') : t('Top Task')
 }
 
 const DROP_COLUMN_GROUPS: Array<Array<Column['key']>> = [
@@ -388,16 +391,16 @@ function defaultColumns(byTask: boolean, byAgent: boolean, showSaved: boolean): 
   // dashes for the majority of users, so it is omitted entirely.
   // Widths are MINIMUMS; sizeColumnsToContent() expands them to fit cell text.
   return [
-    { key: 'provider',   header: 'Provider',                          align: 'left',  width: 8,  priority: 0 },
-    { key: 'model',      header: 'Model',                             align: 'left',  width: 8,  priority: 0 },
+    { key: 'provider',   header: t('Provider'),                       align: 'left',  width: 8,  priority: 0 },
+    { key: 'model',      header: t('Model'),                          align: 'left',  width: 8,  priority: 0 },
     { key: 'task',       header: thirdColumnHeader(byTask, byAgent),  align: 'left',  width: 8,  priority: 1 },
-    { key: 'input',      header: 'Input',                      align: 'right', width: 6,  priority: 2 },
-    { key: 'output',     header: 'Output',                     align: 'right', width: 6,  priority: 2 },
-    { key: 'cacheWrite', header: 'Cache Write',                align: 'right', width: 11, priority: 3 },
-    { key: 'cacheRead',  header: 'Cache Read',                 align: 'right', width: 10, priority: 3 },
-    { key: 'total',      header: 'Total',                      align: 'right', width: 6,  priority: 0 },
-    { key: 'cost',       header: 'Cost',                       align: 'right', width: 6,  priority: 0 },
-    ...(showSaved ? [{ key: 'saved' as const, header: 'Saved', align: 'right' as const, width: 6, priority: 0 }] : []),
+    { key: 'input',      header: t('Input'),                   align: 'right', width: 6,  priority: 2 },
+    { key: 'output',     header: t('Output'),                  align: 'right', width: 6,  priority: 2 },
+    { key: 'cacheWrite', header: t('Cache Write'),             align: 'right', width: 11, priority: 3 },
+    { key: 'cacheRead',  header: t('Cache Read'),              align: 'right', width: 10, priority: 3 },
+    { key: 'total',      header: t('Total'),                   align: 'right', width: 6,  priority: 0 },
+    { key: 'cost',       header: t('Cost'),                    align: 'right', width: 6,  priority: 0 },
+    ...(showSaved ? [{ key: 'saved' as const, header: t('Saved'), align: 'right' as const, width: 6, priority: 0 }] : []),
   ]
 }
 
@@ -537,9 +540,9 @@ export function renderTable(
       case 'model':      return isNewGroup ? row.modelDisplayName : ''
       case 'task':
         if (byAgent) return row.agentType ?? ''
-        if (byTask) return row.category ? categoryLabel(row.category) : ''
+        if (byTask) return row.category ? t(categoryLabel(row.category)) : ''
         return row.topCategory
-          ? `${categoryLabel(row.topCategory)} ${chalk.dim(`(${Math.round((row.topCategoryShare ?? 0) * 100)}%)`)}`
+          ? `${t(categoryLabel(row.topCategory))} ${chalk.dim(`(${Math.round((row.topCategoryShare ?? 0) * 100)}%)`)}`
           : chalk.dim('-')
       case 'input':      return formatTokens(row.inputTokens)
       case 'output':     return formatTokens(row.outputTokens)
@@ -585,7 +588,7 @@ export function renderTable(
     const cells = defaultColumns(byTask, byAgent, showSaved).map(col => {
       switch (col.key) {
         case 'provider':   return ''
-        case 'model':      return chalk.yellow.bold('Total')
+        case 'model':      return chalk.yellow.bold(t('Total'))
         case 'task':       return ''
         case 'input':      return chalk.yellow(formatTokens(totals.input))
         case 'output':     return chalk.yellow(formatTokens(totals.output))
@@ -708,7 +711,7 @@ export function renderMarkdown(rows: ModelReportRow[], opts: { byTask?: boolean;
   const byAgent = opts.byAgent ?? false
   const showTotals = opts.showTotals ?? true
 
-  const header = ['Provider', 'Model', thirdColumnHeader(byTask, byAgent), 'Input', 'Output', 'Cache Write', 'Cache Read', 'Total', 'Cost', 'Saved']
+  const header = [t('Provider'), t('Model'), thirdColumnHeader(byTask, byAgent), t('Input'), t('Output'), t('Cache Write'), t('Cache Read'), t('Total'), t('Cost'), t('Saved')]
   const align = ['---', '---', '---', '---:', '---:', '---:', '---:', '---:', '---:', '---:']
 
   const lines: string[] = []
@@ -719,9 +722,9 @@ export function renderMarkdown(rows: ModelReportRow[], opts: { byTask?: boolean;
     const taskCell = byAgent
       ? row.agentType ?? ''
       : byTask
-        ? row.category ? categoryLabel(row.category) : ''
+        ? row.category ? t(categoryLabel(row.category)) : ''
         : row.topCategory
-          ? `${categoryLabel(row.topCategory)} (${Math.round((row.topCategoryShare ?? 0) * 100)}%)`
+          ? `${t(categoryLabel(row.topCategory))} (${Math.round((row.topCategoryShare ?? 0) * 100)}%)`
           : '-'
     const cells = [
       mdEscape(row.providerDisplayName),
@@ -754,7 +757,7 @@ export function renderMarkdown(rows: ModelReportRow[], opts: { byTask?: boolean;
     )
     const totalCells = [
       '',
-      '**Total**',
+      `**${t('Total')}**`,
       '',
       `**${formatTokens(totals.input)}**`,
       `**${formatTokens(totals.output)}**`,

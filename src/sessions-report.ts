@@ -1,4 +1,6 @@
 import { behavioralCallCount, behavioralTurnCount } from './behavioral-weight.js'
+import { displayWidth, truncateToWidth } from './format.js'
+import { t, tn } from './i18n.js'
 import { getShortModelName } from './models.js'
 import { inferSessionProvider, sessionBillableOutputTokens } from './session-output.js'
 import { CATEGORY_LABELS } from './types.js'
@@ -105,20 +107,22 @@ function fitColumns(columns: SessionColumn[], available: number, dropOrder?: Ses
   return fitted
 }
 
+// Widths are terminal cells, not characters, so a CJK label neither overflows
+// its column nor loses a character it had room for.
 function truncate(value: string, width: number): string {
-  if (value.length <= width) return value
-  if (width <= 1) return value.slice(0, width)
-  return value.slice(0, width - 1) + '\u2026'
+  if (displayWidth(value) <= width) return value
+  if (width <= 1) return truncateToWidth(value, width)
+  return truncateToWidth(value, width, '\u2026')
 }
 
 export function cleanSessionProjectLabel(raw: string): string {
   const normalized = raw.trim().replace(/\\/g, '/').replace(/\/+$/, '')
-  if (!normalized) return 'Unknown'
+  if (!normalized) return t('Unknown')
 
   if (normalized.startsWith('/')) {
     const parts = normalized.split('/').filter(Boolean)
-    if (normalized === '/private/tmp' || normalized === '/tmp') return 'Temporary'
-    return parts.at(-1) || 'Unknown'
+    if (normalized === '/private/tmp' || normalized === '/tmp') return t('Temporary')
+    return parts.at(-1) || t('Unknown')
   }
 
   // Claude stores a cwd such as /Users/alex/Projects/acme/app as the lossy
@@ -126,7 +130,7 @@ export function cleanSessionProjectLabel(raw: string): string {
   // prefix and known workspace container without ever exposing the username.
   let label = normalized.replace(/^-?Users-[^-]+-/, '')
   label = label.replace(/^(Projects|Developer|Documents|Desktop|Downloads)-/, '')
-  if (label === 'private-tmp' || label === '-private-tmp') return 'Temporary'
+  if (label === 'private-tmp' || label === '-private-tmp') return t('Temporary')
 
   const worktreeMarker = label.match(/(?:--|-\.claude-|-)(?:claude-)?worktrees-/)
   if (worktreeMarker?.index !== undefined) {
@@ -142,18 +146,18 @@ export function cleanSessionProjectLabel(raw: string): string {
   // (Projects/eywa/eywa). Collapse that noisy shape.
   const parts = label.split('-').filter(Boolean)
   if (parts.length >= 2 && parts.at(-1) === parts.at(-2)) return parts.at(-1)!
-  return label || 'Unknown'
+  return label || t('Unknown')
 }
 
 export function shortSessionId(value: string): string {
   const id = value.trim()
-  if (id.startsWith('agent-')) return `Agent ${id.slice(6, 14)}`
+  if (id.startsWith('agent-')) return t('Agent %s', id.slice(6, 14))
   if (id.startsWith('rollout-')) {
     const tail = id.match(/([0-9a-f]{8})-[0-9a-f-]{27,}$/i)?.[1]
     return `Codex ${tail ?? id.slice(-8)}`
   }
   if (/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(id)) return `${id.slice(0, 8)}\u2026${id.slice(-4)}`
-  return id.length > 24 ? `${id.slice(0, 12)}\u2026${id.slice(-6)}` : id || 'Unknown session'
+  return id.length > 24 ? `${id.slice(0, 12)}\u2026${id.slice(-6)}` : id || t('Unknown session')
 }
 
 export function sessionDisplayName(row: SessionRow): string {
@@ -162,7 +166,7 @@ export function sessionDisplayName(row: SessionRow): string {
 
 export function sessionModelLabel(models: string[]): string {
   const visible = models.filter(model => model !== '<synthetic>')
-  return (visible.length > 0 ? visible : models).map(getShortModelName).join(', ') || 'Unknown'
+  return (visible.length > 0 ? visible : models).map(getShortModelName).join(', ') || t('Unknown')
 }
 
 function cellValue(row: SessionRow, key: SessionColumnKey): string {
@@ -191,7 +195,7 @@ function renderSessionGrid<T>(columns: SessionColumn[], items: T[], cell: (item:
   // Content can use spare room, but never grow beyond the terminal frame.
   for (let i = 0; i < fitted.length; i++) {
     const col = fitted[i]!
-    const longest = Math.max(col.header.length, ...values.map(row => row[i]?.length ?? 0))
+    const longest = Math.max(displayWidth(col.header), ...values.map(row => displayWidth(row[i] ?? '')))
     const spare = available - frameWidth(fitted)
     const wanted = Math.max(0, Math.min(longest - col.width, spare))
     col.width += wanted
@@ -201,7 +205,7 @@ function renderSessionGrid<T>(columns: SessionColumn[], items: T[], cell: (item:
     left + fitted.map(col => '\u2500'.repeat(col.width + 2)).join(middle) + right
   const line = (cells: string[]): string => '\u2502' + fitted.map((col, i) => {
     const value = truncate(cells[i] ?? '', col.width)
-    const padding = ' '.repeat(Math.max(0, col.width - value.length))
+    const padding = ' '.repeat(Math.max(0, col.width - displayWidth(value)))
     return ` ${col.right ? padding + value : value + padding} `
   }).join('\u2502') + '\u2502'
 
@@ -217,16 +221,16 @@ function renderSessionGrid<T>(columns: SessionColumn[], items: T[], cell: (item:
 
 function sessionColumns(hasSavings: boolean, childrenColumn: boolean): SessionColumn[] {
   return [
-    { key: 'started', header: 'Started', width: 16, minWidth: 10 },
-    { key: 'session', header: 'Session', width: 30, minWidth: 12, flex: 3 },
-    ...(childrenColumn ? [{ key: 'children' as const, header: 'Children', width: 8, minWidth: 5, right: true, optional: true }] : []),
-    { key: 'project', header: 'Project', width: 24, minWidth: 10, flex: 2 },
-    { key: 'provider', header: 'Provider', width: 9, minWidth: 8, optional: true },
-    { key: 'models', header: 'Models', width: 22, minWidth: 10, flex: 2 },
-    { key: 'cost', header: 'Cost', width: 9, minWidth: 7, right: true },
-    ...(hasSavings ? [{ key: 'saved' as const, header: 'Saved', width: 9, minWidth: 7, right: true, optional: true }] : []),
-    { key: 'calls', header: 'Calls', width: 7, minWidth: 5, right: true, optional: true },
-    { key: 'turns', header: 'Turns', width: 7, minWidth: 5, right: true, optional: true },
+    { key: 'started', header: t('Started'), width: 16, minWidth: 10 },
+    { key: 'session', header: t('Session'), width: 30, minWidth: 12, flex: 3 },
+    ...(childrenColumn ? [{ key: 'children' as const, header: t('Children'), width: 8, minWidth: 5, right: true, optional: true }] : []),
+    { key: 'project', header: t('Project'), width: 24, minWidth: 10, flex: 2 },
+    { key: 'provider', header: t('Provider'), width: 9, minWidth: 8, optional: true },
+    { key: 'models', header: t('Models'), width: 22, minWidth: 10, flex: 2 },
+    { key: 'cost', header: t('Cost'), width: 9, minWidth: 7, right: true },
+    ...(hasSavings ? [{ key: 'saved' as const, header: t('Saved'), width: 9, minWidth: 7, right: true, optional: true }] : []),
+    { key: 'calls', header: t('Calls'), width: 7, minWidth: 5, right: true, optional: true },
+    { key: 'turns', header: t('Turns'), width: 7, minWidth: 5, right: true, optional: true },
   ]
 }
 
@@ -235,7 +239,7 @@ export function renderTable(rows: SessionRow[], opts: SessionTableOptions = {}):
   const hasSavings = sorted.some(row => row.savingsUSD > 0)
   const available = Math.max(60, opts.terminalWidth ?? defaultTerminalWidth())
   const totalCost = sorted.reduce((sum, row) => sum + row.cost, 0)
-  const footer = `${sorted.length.toLocaleString('en-US')} sessions  \u2022  $${totalCost.toFixed(2)} total  \u2022  newest first`
+  const footer = t('%s sessions  \u2022  $%s total  \u2022  newest first', sorted.length.toLocaleString('en-US'), totalCost.toFixed(2))
   return renderSessionGrid(sessionColumns(hasSavings, false), sorted, cellValue, footer, available)
 }
 
@@ -326,7 +330,14 @@ export function renderWorkUnitTable(rows: SessionRow[], resolution: WorkUnitReso
   // ungrouped views total the same spend.
   const totalCost = entries.reduce((total, entry) => total + entry.display.row.cost, 0)
   const unitCount = entries.filter(entry => entry.display.childCount > 0).length
-  const footer = `${rows.length.toLocaleString('en-US')} sessions  \u2022  ${unitCount.toLocaleString('en-US')} work unit${unitCount === 1 ? '' : 's'}  \u2022  $${totalCost.toFixed(2)} total  \u2022  newest first`
+  const footer = tn(
+    '%1$s sessions  \u2022  %2$s work unit  \u2022  $%3$s total  \u2022  newest first',
+    '%1$s sessions  \u2022  %2$s work units  \u2022  $%3$s total  \u2022  newest first',
+    unitCount,
+    rows.length.toLocaleString('en-US'),
+    unitCount.toLocaleString('en-US'),
+    totalCost.toFixed(2),
+  )
   return renderSessionGrid(sessionColumns(hasSavings, true), displays, workUnitCell, footer, available, ['children', 'turns', 'saved', 'provider', 'calls'])
 }
 

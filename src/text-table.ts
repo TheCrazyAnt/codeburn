@@ -1,11 +1,16 @@
 import { Chalk } from 'chalk'
 
+import { displayWidth } from './format.js'
+
 export type TableColumn = { header: string; right?: boolean }
 
-// Visible width, ignoring ANSI color codes, so padding stays aligned.
+// Visible width, ignoring ANSI color codes, so padding stays aligned. Measured
+// in terminal cells rather than characters, so a translated (CJK) header keeps
+// its column square; identical to the character count for ASCII.
 function vlen(s: string): number {
   // eslint-disable-next-line no-control-regex
-  return s.replace(/\[[0-9;]*m/g, '').length
+  const plain = s.replace(/\[[0-9;]*m/g, '')
+  return displayWidth(plain)
 }
 
 // Box-drawing table with roomy 2-space cell padding, right-aligned numeric

@@ -8,6 +8,7 @@ import {
   type ContextRow,
   type ContextSessionInfo,
 } from '@/lib/api'
+import { t } from '@/lib/i18n'
 import { cn, fmtNum, fmtTokens, label } from '@/lib/utils'
 import { Card } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -19,9 +20,9 @@ const PROVIDERS: Array<{ key: ContextProvider; label: string }> = [
 
 function ago(mtimeMs: number): string {
   const mins = Math.max(0, Math.round((Date.now() - mtimeMs) / 60_000))
-  if (mins < 60) return `${mins}m ago`
-  if (mins < 60 * 24) return `${Math.round(mins / 60)}h ago`
-  return `${Math.round(mins / (60 * 24))}d ago`
+  if (mins < 60) return t('%dm ago', mins)
+  if (mins < 60 * 24) return t('%dh ago', mins / 60)
+  return t('%dd ago', mins / (60 * 24))
 }
 
 function TreeTable({ rows }: { rows: ContextRow[] }) {
@@ -42,7 +43,7 @@ function TreeTable({ rows }: { rows: ContextRow[] }) {
           >
             {r.label}
           </span>
-          <span className="relative w-16 shrink-0 text-right text-xs tabular-nums text-tertiary-foreground">{fmtNum(r.count)}x</span>
+          <span className="relative w-16 shrink-0 text-right text-xs tabular-nums text-tertiary-foreground">{t('%sx', fmtNum(r.count))}</span>
           <span className={cn('relative w-20 shrink-0 text-right text-[13px] tabular-nums', r.bold ? 'font-semibold text-foreground' : 'text-foreground')}>
             {fmtTokens(r.tokens)}
           </span>
@@ -74,12 +75,16 @@ function SessionDetails({ provider, id }: { provider: ContextProvider; id: strin
       <div className="flex flex-col gap-2 px-4 py-4">
         <Skeleton className="h-14" />
         <Skeleton className="h-40" />
-        <p className="text-xs text-tertiary-foreground">Reading the whole transcript, large sessions take a few seconds…</p>
+        <p className="text-xs text-tertiary-foreground">{t('Reading the whole transcript, large sessions take a few seconds…')}</p>
       </div>
     )
   }
   if (isError || !data) {
-    return <p className="px-4 py-4 text-sm text-tertiary-foreground">Failed to load: {String((error as Error)?.message ?? 'unknown')}</p>
+    return (
+      <p className="px-4 py-4 text-sm text-tertiary-foreground">
+        {t('Failed to load: %s', String((error as Error)?.message ?? t('unknown')))}
+      </p>
+    )
   }
 
   const view = scope === 'full' ? data.full : data.effective
@@ -90,19 +95,19 @@ function SessionDetails({ provider, id }: { provider: ContextProvider; id: strin
   return (
     <div className="flex flex-col gap-3 px-4 py-4">
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <Chip label="Messages" value={fmtNum(view.messages)} />
-        <Chip label="Est. tokens" value={fmtTokens(view.tokens)} />
+        <Chip label={t('Messages')} value={fmtNum(view.messages)} />
+        <Chip label={t('Est. tokens')} value={fmtTokens(view.tokens)} />
         <Chip
-          label="Context (exact)"
+          label={t('Context (exact)')}
           value={data.reported ? (window ? `${fmtTokens(data.reported.context)} / ${fmtTokens(window)}` : fmtTokens(data.reported.context)) : '—'}
         />
-        <Chip label="Compactions" value={fmtNum(data.compactions)} />
+        <Chip label={t('Compactions')} value={fmtNum(data.compactions)} />
       </div>
 
       {pct !== null && (
         <div>
           <div className="mb-1 flex justify-between text-[11px] text-tertiary-foreground">
-            <span>{label(data.model)} · live context window</span>
+            <span>{t('%s · live context window', label(data.model))}</span>
             <span className="tabular-nums">{pct}%</span>
           </div>
           <div className="h-1.5 overflow-hidden rounded-full bg-interactive-secondary">
@@ -123,11 +128,11 @@ function SessionDetails({ provider, id }: { provider: ContextProvider; id: strin
                 scope === s ? 'bg-active-primary text-foreground shadow-sm' : 'text-tertiary-foreground hover:text-foreground',
               )}
             >
-              {s === 'effective' ? 'Live window' : 'Full history'}
+              {s === 'effective' ? t('Live window') : t('Full history')}
             </button>
           ))}
         </div>
-        <span className="text-[11px] text-tertiary-foreground">token counts are estimates; “Context (exact)” comes from API usage</span>
+        <span className="text-[11px] text-tertiary-foreground">{t('token counts are estimates; “Context (exact)” comes from API usage')}</span>
       </div>
 
       <TreeTable rows={rows} />
@@ -154,7 +159,7 @@ function SessionRow({ s, open, onToggle }: { s: ContextSessionInfo; open: boolea
         </svg>
         <span className="shrink-0 font-mono text-xs text-primary">{s.sessionId.slice(0, 8)}</span>
         <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">
-          {s.title || <span className="text-tertiary-foreground">untitled session</span>}
+          {s.title || <span className="text-tertiary-foreground">{t('untitled session')}</span>}
         </span>
         <span className="hidden shrink-0 text-xs text-tertiary-foreground sm:block">{s.project}</span>
         <span className="w-16 shrink-0 text-right text-xs tabular-nums text-tertiary-foreground">{ago(s.mtimeMs)}</span>
@@ -200,7 +205,7 @@ export function ContextExplorer() {
             {p.label}
           </button>
         ))}
-        <span className="ml-auto text-xs text-tertiary-foreground">what fills each session’s context window, block by block</span>
+        <span className="ml-auto text-xs text-tertiary-foreground">{t('what fills each session’s context window, block by block')}</span>
       </div>
 
       <Card className="overflow-hidden">
@@ -211,8 +216,14 @@ export function ContextExplorer() {
             ))}
           </div>
         )}
-        {isError && <p className="px-4 py-6 text-sm text-tertiary-foreground">Failed to load sessions: {String((error as Error)?.message)}</p>}
-        {data && data.length === 0 && <p className="px-4 py-6 text-sm text-tertiary-foreground">No sessions found for this provider.</p>}
+        {isError && (
+          <p className="px-4 py-6 text-sm text-tertiary-foreground">
+            {t('Failed to load sessions: %s', String((error as Error)?.message))}
+          </p>
+        )}
+        {data && data.length === 0 && (
+          <p className="px-4 py-6 text-sm text-tertiary-foreground">{t('No sessions found for this provider.')}</p>
+        )}
         {data?.map((s) => (
           <SessionRow key={s.sessionId} s={s} open={openId === s.sessionId} onToggle={() => setOpenId(openId === s.sessionId ? null : s.sessionId)} />
         ))}

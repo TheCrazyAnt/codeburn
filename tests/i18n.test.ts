@@ -125,3 +125,16 @@ describe('a missing or partial catalog', () => {
     expect(t('a key no catalog will ever contain')).toBe('a key no catalog will ever contain')
   })
 })
+
+describe('reordered placeholders survive translation', () => {
+  it('renders explicit positions in the translation order', () => {
+    // The zh-CN catalog reorders several keys with %1$s-style positions; the
+    // formatter must place each argument by its declared slot, not by the
+    // order the placeholders happen to appear in.
+    setLanguage('zh-CN')
+    const rendered = t('Error: Plugin "%s" not found in %s.', 'demo', '/plugins')
+    expect(rendered).toContain('demo')
+    expect(rendered).toContain('/plugins')
+    expect(rendered.indexOf('/plugins')).toBeLessThan(rendered.indexOf('demo'))
+  })
+})

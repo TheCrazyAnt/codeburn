@@ -1,12 +1,74 @@
 import chalk from 'chalk'
 import type { ProjectSummary } from './types.js'
 import { behavioralCallCount } from './behavioral-weight.js'
+import { t } from './i18n.js'
 
 // Re-exported from currency.ts so existing imports from './format.js' keep working.
 // The currency-aware version applies exchange rate and symbol automatically.
 // Imported locally too since renderStatusBar below uses it directly.
 import { formatCost } from './currency.js'
 export { formatCost }
+
+/// Terminal cells one code point occupies. East Asian Wide and Fullwidth code
+/// points take two, so counting characters would misalign every column to the
+/// right of a translated header or label. ASCII, Latin and the box-drawing
+/// characters these tables use all stay at 1, so English output is unchanged.
+function charCells(cp: number): number {
+  const wide =
+    (cp >= 0x1100 && cp <= 0x115f) || // Hangul Jamo
+    (cp >= 0x2e80 && cp <= 0x303e) || // CJK radicals, Kangxi, CJK symbols/punctuation
+    (cp >= 0x3041 && cp <= 0x33ff) || // Kana, Hangul Compatibility Jamo, CJK compatibility
+    (cp >= 0x3400 && cp <= 0x4dbf) || // CJK Unified Ideographs Extension A
+    (cp >= 0x4e00 && cp <= 0x9fff) || // CJK Unified Ideographs
+    (cp >= 0xa000 && cp <= 0xa4cf) || // Yi
+    (cp >= 0xac00 && cp <= 0xd7a3) || // Hangul syllables
+    (cp >= 0xf900 && cp <= 0xfaff) || // CJK Compatibility Ideographs
+    (cp >= 0xfe30 && cp <= 0xfe6f) || // CJK Compatibility Forms, small form variants
+    (cp >= 0xff00 && cp <= 0xff60) || // Fullwidth forms
+    (cp >= 0xffe0 && cp <= 0xffe6) || // Fullwidth signs
+    (cp >= 0x20000 && cp <= 0x3fffd)  // CJK Unified Ideographs Extension B and beyond
+  return wide ? 2 : 1
+}
+
+/// Width of `value` in terminal cells. Equal to `value.length` for ASCII.
+export function displayWidth(value: string): number {
+  let width = 0
+  for (const char of value) width += charCells(char.codePointAt(0)!)
+  return width
+}
+
+/// `String.padEnd` measured in terminal cells.
+export function padCells(value: string, width: number, fill = ' '): string {
+  return value + fill.repeat(Math.max(0, width - displayWidth(value)))
+}
+
+/// Cuts `value` down to `width` terminal cells without splitting a wide
+/// character. When `ellipsis` is set, an over-long value ends with it and the
+/// result still fits inside `width`.
+export function truncateToWidth(value: string, width: number, ellipsis = ''): string {
+  if (displayWidth(value) <= width) return value
+  const budget = Math.max(0, width - displayWidth(ellipsis))
+  let out = ''
+  let used = 0
+  for (const char of value) {
+    const cells = charCells(char.codePointAt(0)!)
+    if (used + cells > budget) break
+    out += char
+    used += cells
+  }
+  return out + ellipsis
+}
+
+/// Translates a period label built by cli-date's `getDateRange`. Those labels
+/// stay English at the source because they travel in the app payload, where the
+/// macOS side runs its own lookup; only what the terminal prints is translated,
+/// and only here, so every report header agrees. An unrecognized label (a
+/// `--from`/`--to` range, a localized month name) passes through untouched.
+export function periodLabelForDisplay(label: string): string {
+  const dated = /^(Today|Yesterday) \((\d{4}-\d{2}-\d{2})\)$/.exec(label)
+  if (dated) return t(`${dated[1]} (%s)`, dated[2])
+  return t(label)
+}
 
 /// Prefix a formatted cost with the estimated marker (`~`) when the figure is
 /// priced from estimated tokens rather than metered. Keeps the marker identical
@@ -23,7 +85,7 @@ export function markEstimated(costStr: string, isEstimated: boolean): string {
 /// doesn't read as inconsistent with detail views that can only see
 /// surviving session files.
 export function carriedCostNote(carriedCostUSD: number): string | null {
-  return carriedCostUSD > 0 ? `includes ${formatCost(carriedCostUSD)} preserved from expired session logs` : null
+  return carriedCostUSD > 0 ? t('includes %s preserved from expired session logs', formatCost(carriedCostUSD)) : null
 }
 
 export function formatTokens(n: number): string {
@@ -65,7 +127,7 @@ export function renderStatusBar(projects: ProjectSummary[], totals?: StatusBarTo
     todayCost = totals.today.cost; todayCalls = totals.today.calls
     monthCost = totals.month.cost; monthCalls = totals.month.calls
     const lines: string[] = ['']
-    lines.push(`  ${chalk.bold('Today')}  ${chalk.yellowBright(formatCost(todayCost))}  ${chalk.dim(`${todayCalls} calls`)}    ${chalk.bold('Month')}  ${chalk.yellowBright(formatCost(monthCost))}  ${chalk.dim(`${monthCalls} calls`)}`)
+    lines.push(`  ${chalk.bold(t('Today'))}  ${chalk.yellowBright(formatCost(todayCost))}  ${chalk.dim(t('%d calls', todayCalls))}    ${chalk.bold(t('Month'))}  ${chalk.yellowBright(formatCost(monthCost))}  ${chalk.dim(t('%d calls', monthCalls))}`)
     lines.push('')
     return lines.join('\n')
   }
@@ -93,7 +155,7 @@ export function renderStatusBar(projects: ProjectSummary[], totals?: StatusBarTo
   }
 
   const lines: string[] = ['']
-  lines.push(`  ${chalk.bold('Today')}  ${chalk.yellowBright(formatCost(todayCost))}  ${chalk.dim(`${todayCalls} calls`)}    ${chalk.bold('Month')}  ${chalk.yellowBright(formatCost(monthCost))}  ${chalk.dim(`${monthCalls} calls`)}`)
+  lines.push(`  ${chalk.bold(t('Today'))}  ${chalk.yellowBright(formatCost(todayCost))}  ${chalk.dim(t('%d calls', todayCalls))}    ${chalk.bold(t('Month'))}  ${chalk.yellowBright(formatCost(monthCost))}  ${chalk.dim(t('%d calls', monthCalls))}`)
   lines.push('')
 
   return lines.join('\n')

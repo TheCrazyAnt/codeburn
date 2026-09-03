@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 
 import type { GranularHistory } from '@/lib/api'
+import { t } from '@/lib/i18n'
 import { usd } from '@/lib/utils'
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
@@ -50,16 +51,17 @@ export function Punchcard({ timeline }: { timeline: GranularHistory }) {
   // happened at hour 0. Show the honest limitation instead of a fake column.
   const hourResolved = timeline.bucketMinutes < 1440
 
-  const bucketNote = timeline.bucketMinutes >= 60 ? 'Hourly buckets' : `${timeline.bucketMinutes}-minute buckets`
+  const bucketNote =
+    timeline.bucketMinutes >= 60 ? t('Hourly buckets') : t('%d-minute buckets', timeline.bucketMinutes)
 
   if (!hasBucket) {
-    return <div className="py-10 text-center text-sm text-tertiary-foreground">No timestamped usage in this period.</div>
+    return <div className="py-10 text-center text-sm text-tertiary-foreground">{t('No timestamped usage in this period.')}</div>
   }
 
   if (!hourResolved) {
     return (
       <div className="py-8 text-center text-sm text-tertiary-foreground">
-        Hour-of-day detail needs sub-daily buckets. Switch to Today or 7 days to see the punchcard.
+        {t('Hour-of-day detail needs sub-daily buckets. Switch to Today or 7 days to see the punchcard.')}
       </div>
     )
   }
@@ -69,9 +71,9 @@ export function Punchcard({ timeline }: { timeline: GranularHistory }) {
   return (
     <div>
       <div className="mb-3 flex items-center justify-between gap-3">
-        <span className="text-[10px] font-medium uppercase tracking-[0.1em] text-tertiary-foreground">{bucketNote} · local time</span>
+        <span className="text-[10px] font-medium uppercase tracking-[0.1em] text-tertiary-foreground">{t('%s · local time', bucketNote)}</span>
         <div className="flex items-center gap-1.5 text-[10px] text-tertiary-foreground">
-          <span>Less</span>
+          <span>{t('Less')}</span>
           {[0.12, 0.4, 0.7, 1].map((t) => (
             <span
               key={t}
@@ -84,7 +86,7 @@ export function Punchcard({ timeline }: { timeline: GranularHistory }) {
               }}
             />
           ))}
-          <span>More</span>
+          <span>{t('More')}</span>
         </div>
       </div>
 
@@ -111,7 +113,7 @@ export function Punchcard({ timeline }: { timeline: GranularHistory }) {
               className="grid items-center"
               style={{ gridTemplateColumns: '2.25rem repeat(24, minmax(0, 1fr))' }}
             >
-              <span className="pr-2 text-right text-[11px] tabular-nums text-tertiary-foreground">{wdLabel}</span>
+              <span className="pr-2 text-right text-[11px] tabular-nums text-tertiary-foreground">{t(wdLabel)}</span>
               {HOURS.map((h) => {
                 const cell = grid[wd]![h]!
                 const t = intensity(cell.cost, max)
@@ -164,7 +166,7 @@ export function Punchcard({ timeline }: { timeline: GranularHistory }) {
               style={{ left: hover.x, top: hover.y < 56 ? hover.y + 14 : hover.y - 8, transform: hover.y < 56 ? 'translateX(-50%)' : 'translate(-50%, -100%)' }}
             >
               <div className="font-medium text-foreground">
-                {WEEKDAYS_FULL[hover.wd]} {pad2(hover.h)}:00
+                {t('%1$s %2$s:00', t(WEEKDAYS_FULL[hover.wd]!), pad2(hover.h))}
               </div>
               <div className="tabular-nums text-tertiary-foreground">{usd(hovered.cost)}</div>
             </div>

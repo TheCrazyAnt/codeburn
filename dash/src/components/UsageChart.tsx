@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 
 import type { DailyEntry, DeviceUsage, GranularHistory } from '@/lib/api'
+import { t, useLanguage } from '@/lib/i18n'
 import { CHART_COLORS, cn, compactUsd, fmtTokens, label, usd } from '@/lib/utils'
 
 export type Unit = 'cost' | 'tokens'
@@ -43,7 +44,7 @@ function makeTooltip(labels: Record<string, string>, fmt: (n: number) => string,
             </div>
           ))}
           <div className="mt-1 flex items-center justify-between border-t border-border pt-1 text-foreground">
-            <span>Total</span>
+            <span>{t('Total')}</span>
             <span className="font-semibold tabular-nums">{fmt(total)}</span>
           </div>
         </div>
@@ -75,9 +76,9 @@ function fmtTimelineTooltip(value: string, bucketMinutes: number): string {
 }
 
 function bucketLabel(bucketMinutes: number): string {
-  if (bucketMinutes >= 1440) return 'Daily buckets'
-  if (bucketMinutes >= 60) return 'Hourly buckets'
-  return `${bucketMinutes}-minute buckets`
+  if (bucketMinutes >= 1440) return t('Daily buckets')
+  if (bucketMinutes >= 60) return t('Hourly buckets')
+  return t('%d-minute buckets', bucketMinutes)
 }
 
 function fmtTimelineUsd(value: number | string): string {
@@ -102,6 +103,7 @@ function GranularLines({
   breakdown: Breakdown
   unit: Unit
 }) {
+  const lang = useLanguage()
   const { rows, series, labels } = useMemo(() => {
     const metadata = breakdown === 'sessions' ? timeline.sessionSeries : timeline.modelSeries
     const totals = new Map<string, number>()
@@ -140,7 +142,7 @@ function GranularLines({
     const chartSeries: Series[] = keys.map((key, index) => ({
       key,
       label: key === 'display_other'
-        ? 'Other'
+        ? t('Other')
         : breakdown === 'models'
           ? label(metadataById.get(key) ?? key)
           : metadataById.get(key) ?? key,
@@ -161,10 +163,14 @@ function GranularLines({
       series: chartSeries,
       labels: Object.fromEntries(chartSeries.map(item => [item.key, item.label])),
     }
-  }, [timeline, breakdown, unit])
+  }, [timeline, breakdown, unit, lang])
 
   if (series.length === 0) {
-    return <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-tertiary-foreground">No timestamped usage in this period.</div>
+    return (
+      <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-tertiary-foreground">
+        {t('No timestamped usage in this period.')}
+      </div>
+    )
   }
 
   const fmt = unit === 'tokens' ? fmtTokens : usd
@@ -280,6 +286,7 @@ export function UsageChart({ daily, unit = 'cost' }: { daily: DailyEntry[]; unit
 }
 
 function LegacyUsageChart({ daily, unit = 'cost' }: { daily: DailyEntry[]; unit?: Unit }) {
+  const lang = useLanguage()
   const { rows, series, labels } = useMemo(() => {
     const measure = (m: { cost: number; inputTokens: number; outputTokens: number }) =>
       unit === 'tokens' ? m.inputTokens + m.outputTokens : m.cost
@@ -301,7 +308,7 @@ function LegacyUsageChart({ daily, unit = 'cost' }: { daily: DailyEntry[]; unit?
     const series: Series[] = keys.map((k, i) => ({ key: k, label: label(k), color: CHART_COLORS[i % CHART_COLORS.length]! }))
     const labels = Object.fromEntries(series.map((s) => [s.key, s.label]))
     return { rows: rowData, series, labels }
-  }, [daily, unit])
+  }, [daily, unit, lang])
 
   return <StackedBars rows={rows} series={series} labels={labels} unit={unit} />
 }
@@ -343,7 +350,7 @@ export function GranularUsageChart({
                   !available && 'cursor-not-allowed opacity-40',
                 )}
               >
-                {option}
+                {option === 'sessions' ? t('Sessions') : t('Models')}
               </button>
             )
           })}
@@ -356,6 +363,7 @@ export function GranularUsageChart({
 
 // Spend (or tokens) per day, stacked by device (one color per device) for the All view.
 export function DeviceUsageChart({ devices, unit = 'cost' }: { devices: DeviceUsage[]; unit?: Unit }) {
+  const lang = useLanguage()
   const { rows, series, labels } = useMemo(() => {
     const named = devices.filter((d) => d.payload)
     const dailyOf = (d: DeviceUsage) => d.payload?.history?.daily ?? []
@@ -371,7 +379,7 @@ export function DeviceUsageChart({ devices, unit = 'cost' }: { devices: DeviceUs
     const dates = [...new Set(named.flatMap((d) => dailyOf(d).map((e) => e.date)))].sort((a, b) => a.localeCompare(b))
     const series: Series[] = named.map((d) => ({
       key: keyOf(d),
-      label: d.name + (d.local ? ' (this Mac)' : ''),
+      label: d.local ? t('%s (this Mac)', d.name) : d.name,
       color: colorOf(d.id),
     }))
     const rowData = dates.map((date) => {
@@ -384,7 +392,7 @@ export function DeviceUsageChart({ devices, unit = 'cost' }: { devices: DeviceUs
     })
     const labels = Object.fromEntries(series.map((s) => [s.key, s.label]))
     return { rows: rowData, series, labels }
-  }, [devices, unit])
+  }, [devices, unit, lang])
 
   return <StackedBars rows={rows} series={series} labels={labels} unit={unit} />
 }

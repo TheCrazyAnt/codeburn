@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import type { Current } from '@/lib/api'
+import { t, tsplit } from '@/lib/i18n'
 import { fmtNum } from '@/lib/utils'
 
 // Median time-to-first-edit is milliseconds; render it compactly (sub-second up
@@ -63,13 +64,13 @@ export function WorkflowPanel({ current }: { current: Current }) {
     <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-2.5">
         <Row
-          label="Correction rate"
-          hint="Share of prompts where you corrected the assistant, and the correction count"
+          label={t('Correction rate')}
+          hint={t('Share of prompts where you corrected the assistant, and the correction count')}
           value={correction}
         />
         <Row
-          label="First-edit time"
-          hint="Median time from a prompt to the first file edit"
+          label={t('First-edit time')}
+          hint={t('Median time from a prompt to the first file edit')}
           value={
             w?.medianTimeToFirstEditMs == null ? (
               <span className="text-tertiary-foreground">—</span>
@@ -80,8 +81,8 @@ export function WorkflowPanel({ current }: { current: Current }) {
         />
         {coverage != null && (
           <Row
-            label="Pricing coverage"
-            hint="Share of cost-bearing calls with a resolved price"
+            label={t('Pricing coverage')}
+            hint={t('Share of cost-bearing calls with a resolved price')}
             // Floor, never round: near-complete coverage with unpriced calls
             // outstanding must not render as the 100% reserved for genuinely
             // complete pricing.
@@ -92,18 +93,23 @@ export function WorkflowPanel({ current }: { current: Current }) {
 
       {reworked.length > 0 && (
         <div className="border-t border-border pt-3">
-          <div className="mb-2 text-[11px] font-medium uppercase tracking-wider text-tertiary-foreground">Most reworked</div>
+          <div className="mb-2 text-[11px] font-medium uppercase tracking-wider text-tertiary-foreground">{t('Most reworked')}</div>
           <div className="flex flex-col gap-1.5">
-            {reworked.slice(0, 8).map((f) => (
-              <div key={f.path} className="flex items-baseline justify-between gap-3">
-                <span className="truncate font-mono text-[12.5px] text-foreground" title={f.path}>
-                  {f.path}
-                </span>
-                <span className="shrink-0 text-xs tabular-nums text-tertiary-foreground">
-                  <span className="font-medium text-foreground">{fmtNum(f.edits)}</span> edits · {fmtNum(f.sessions)} sess
-                </span>
-              </div>
-            ))}
+            {reworked.slice(0, 8).map((f) => {
+              const [before, after] = tsplit('%1$s edits · %2$s sess', fmtNum(f.edits), fmtNum(f.sessions))
+              return (
+                <div key={f.path} className="flex items-baseline justify-between gap-3">
+                  <span className="truncate font-mono text-[12.5px] text-foreground" title={f.path}>
+                    {f.path}
+                  </span>
+                  <span className="shrink-0 text-xs tabular-nums text-tertiary-foreground">
+                    {before}
+                    <span className="font-medium text-foreground">{fmtNum(f.edits)}</span>
+                    {after}
+                  </span>
+                </div>
+              )
+            })}
           </div>
         </div>
       )}

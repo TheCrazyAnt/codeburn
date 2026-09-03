@@ -37,6 +37,7 @@ import {
   buildReceipt,
 } from './consent.js'
 import { installSchedule, removeSchedule } from './schedule-installer.js'
+import { t } from '../i18n.js'
 
 // Helper for executing the push after data collection
 interface ExecutePushInput {
@@ -111,25 +112,25 @@ function buildAcceptanceFingerprintInput(
 export function registerSyncCommands(program: Command): void {
   const sync = program
     .command('sync')
-    .description('Sync AI usage telemetry to a remote OTLP endpoint')
+    .description(t('Sync AI usage telemetry to a remote OTLP endpoint'))
 
   // --- setup ---
   sync
     .command('setup <url>')
-    .description('Configure sync with a remote endpoint (one-time)')
+    .description(t('Configure sync with a remote endpoint (one-time)'))
     .action(async (url: string) => {
       try {
         const baseUrl = url.replace(/\/$/, '')
-        process.stderr.write(`Fetching discovery doc from ${baseUrl}...\n`)
+        process.stderr.write(t('Fetching discovery doc from %s...', baseUrl) + '\n')
 
         // 1. Fetch codeburn discovery doc
         const discovery = await fetchDiscoveryDoc(baseUrl)
-        process.stderr.write(`  Issuer: ${discovery.issuer}\n`)
-        process.stderr.write(`  Client: ${discovery.client_id}\n`)
+        process.stderr.write('  ' + t('Issuer: %s', discovery.issuer) + '\n')
+        process.stderr.write('  ' + t('Client: %s', discovery.client_id) + '\n')
 
         // 2. Fetch OIDC configuration from the issuer
         const oidc = await fetchOidcConfig(discovery.issuer)
-        process.stderr.write(`  Auth endpoint: ${oidc.authorization_endpoint}\n`)
+        process.stderr.write('  ' + t('Auth endpoint: %s', oidc.authorization_endpoint) + '\n')
 
         // 3. Resolve scopes
         const scopes = resolveScopes(discovery.scopes, oidc.scopes_supported)
@@ -159,8 +160,8 @@ export function registerSyncCommands(program: Command): void {
           pkce,
         })
 
-        process.stderr.write(`\nOpening browser for login...\n`)
-        process.stderr.write(`If the browser doesn't open, visit:\n  ${authUrl}\n\n`)
+        process.stderr.write('\n' + t('Opening browser for login...') + '\n')
+        process.stderr.write(t('If the browser doesn\'t open, visit:') + `\n  ${authUrl}\n\n`)
 
         // Open browser (best-effort, platform-specific).
         // execFileSync with args array — authUrl comes from the remote discovery
@@ -187,7 +188,7 @@ export function registerSyncCommands(program: Command): void {
         }
 
         // 7. Wait for callback
-        process.stderr.write(`Waiting for login (5 min timeout)...\n`)
+        process.stderr.write(t('Waiting for login (5 min timeout)...') + '\n')
         const callback = await callbackPromise
 
         // 8. Exchange code for tokens
@@ -201,7 +202,7 @@ export function registerSyncCommands(program: Command): void {
         )
 
         if (!tokens.refresh_token) {
-          process.stderr.write(`Warning: IdP did not return a refresh token. You may need to re-authenticate frequently.\n`)
+          process.stderr.write(t('Warning: IdP did not return a refresh token. You may need to re-authenticate frequently.') + '\n')
         }
 
         // 9. Store credentials
@@ -218,17 +219,17 @@ export function registerSyncCommands(program: Command): void {
           issuer: discovery.issuer,
         })
 
-        process.stderr.write(`\n✓ Sync configured successfully.\n`)
-        process.stderr.write(`  Endpoint: ${baseUrl}\n`)
-        process.stderr.write(`  Token stored in: ${store.method()}\n`)
-        process.stderr.write(`\nRun \`codeburn sync push\` to send telemetry data.\n`)
+        process.stderr.write('\n✓ ' + t('Sync configured successfully.') + '\n')
+        process.stderr.write('  ' + t('Endpoint: %s', baseUrl) + '\n')
+        process.stderr.write('  ' + t('Token stored in: %s', store.method()) + '\n')
+        process.stderr.write('\n' + t('Run `codeburn sync push` to send telemetry data.') + '\n')
       } catch (err) {
         // Known errors (login timeout, port exhaustion, discovery failures)
         // get a clean one-line message instead of a raw Node crash dump.
         if (err instanceof AuthError || err instanceof DiscoveryError) {
-          process.stderr.write(`\nError: ${err.message}\n`)
+          process.stderr.write('\n' + t('Error: %s', err.message) + '\n')
         } else {
-          process.stderr.write(`\nError: ${(err as Error).stack ?? (err as Error).message}\n`)
+          process.stderr.write('\n' + t('Error: %s', (err as Error).stack ?? (err as Error).message) + '\n')
         }
         process.exit(1)
       }
@@ -237,29 +238,29 @@ export function registerSyncCommands(program: Command): void {
   // --- status ---
   sync
     .command('status')
-    .description('Show sync configuration and auth status')
+    .description(t('Show sync configuration and auth status'))
     .action(async () => {
       const config = readSyncConfig()
       if (!config) {
-        process.stderr.write('Sync not configured. Run `codeburn sync setup <url>` first.\n')
+        process.stderr.write(t('Sync not configured. Run `codeburn sync setup <url>` first.') + '\n')
         process.exit(1)
       }
 
       const store = createCredentialStore()
       const token = store.retrieve()
 
-      process.stdout.write(`Endpoint: ${config.baseUrl}\n`)
-      process.stdout.write(`Traces path: ${config.tracesPath}\n`)
-      process.stdout.write(`Issuer: ${config.issuer}\n`)
-      process.stdout.write(`Auth: ${token ? 'configured' : 'missing (run sync setup)'}\n`)
-      process.stdout.write(`Token storage: ${store.method()}\n`)
-      process.stdout.write(`Last sync: ${config.lastSync ?? 'never'}\n`)
+      process.stdout.write(t('Endpoint: %s', config.baseUrl) + '\n')
+      process.stdout.write(t('Traces path: %s', config.tracesPath) + '\n')
+      process.stdout.write(t('Issuer: %s', config.issuer) + '\n')
+      process.stdout.write(t('Auth: %s', token ? t('configured') : t('missing (run sync setup)')) + '\n')
+      process.stdout.write(t('Token storage: %s', store.method()) + '\n')
+      process.stdout.write(t('Last sync: %s', config.lastSync ?? t('never')) + '\n')
     })
 
   // --- logout ---
   sync
     .command('logout')
-    .description('Remove stored credentials and revoke token')
+    .description(t('Remove stored credentials and revoke token'))
     .action(async () => {
       const config = readSyncConfig()
       const store = createCredentialStore()
@@ -271,7 +272,7 @@ export function registerSyncCommands(program: Command): void {
           const oidc = await fetchOidcConfig(config.issuer)
           if (oidc.revocation_endpoint) {
             await revokeToken(oidc.revocation_endpoint, token, config.clientId)
-            process.stderr.write('Token revoked at IdP.\n')
+            process.stderr.write(t('Token revoked at IdP.') + '\n')
           }
         } catch {
           // Best-effort revocation
@@ -280,48 +281,48 @@ export function registerSyncCommands(program: Command): void {
 
       store.delete()
       deleteSyncConfig()
-      process.stderr.write('Sync credentials and config removed.\n')
+      process.stderr.write(t('Sync credentials and config removed.') + '\n')
     })
 
   // --- reset ---
   sync
     .command('reset')
-    .description('Clear the sent-ledger (next push re-sends all calls in window)')
-    .option('--confirm', 'Required to confirm reset')
+    .description(t('Clear the sent-ledger (next push re-sends all calls in window)'))
+    .option('--confirm', t('Required to confirm reset'))
     .action(async (opts: { confirm?: boolean }) => {
       if (!opts.confirm) {
-        process.stderr.write('This will clear the sent-ledger, causing the next push to re-send all data.\n')
-        process.stderr.write('Run with --confirm to proceed.\n')
+        process.stderr.write(t('This will clear the sent-ledger, causing the next push to re-send all data.') + '\n')
+        process.stderr.write(t('Run with --confirm to proceed.') + '\n')
         process.exit(1)
       }
 
       const { clearLedger } = await import('./ledger.js')
       const removed = clearLedger()
       if (removed > 0) {
-        process.stderr.write(`Ledger cleared (${removed} entries). Next push will re-send all calls in window.\n`)
+        process.stderr.write(t('Ledger cleared (%d entries). Next push will re-send all calls in window.', removed) + '\n')
       } else {
-        process.stderr.write('No ledger entries found (nothing to reset).\n')
+        process.stderr.write(t('No ledger entries found (nothing to reset).') + '\n')
       }
     })
 
   // --- push (placeholder for Step 2) ---
   sync
     .command('push')
-    .description('Push unsent telemetry data to the configured endpoint')
-    .option('--since <period>', 'Time window: today, 7d, 30d, month, all (max 6 months)', '7d')
-    .option('--dry-run', 'Show what would be sent without sending')
-    .option('--attribution', 'Also push git attribution spans (session→commit correlation from `codeburn yield`, plus PR links). Sends normalized repo remotes and commit SHAs to the endpoint.')
+    .description(t('Push unsent telemetry data to the configured endpoint'))
+    .option('--since <period>', t('Time window: today, 7d, 30d, month, all (max 6 months)'), '7d')
+    .option('--dry-run', t('Show what would be sent without sending'))
+    .option('--attribution', t('Also push git attribution spans (session→commit correlation from `codeburn yield`, plus PR links). Sends normalized repo remotes and commit SHAs to the endpoint.'))
     .action(async (opts: { since: string; dryRun?: boolean; attribution?: boolean }) => {
       const config = readSyncConfig()
       if (!config) {
-        process.stderr.write('Sync not configured. Run `codeburn sync setup <url>` first.\n')
+        process.stderr.write(t('Sync not configured. Run `codeburn sync setup <url>` first.') + '\n')
         process.exit(1)
       }
 
       const store = createCredentialStore()
       const rt = store.retrieve()
       if (!rt) {
-        process.stderr.write('No auth token found. Run `codeburn sync setup` to authenticate.\n')
+        process.stderr.write(t('No auth token found. Run `codeburn sync setup` to authenticate.') + '\n')
         process.exit(1)
       }
 
@@ -336,7 +337,7 @@ export function registerSyncCommands(program: Command): void {
         }
 
         if (opts.dryRun) {
-          process.stderr.write(`[dry-run] Auth: valid (Bearer token obtained)\n`)
+          process.stderr.write('[dry-run] ' + t('Auth: valid (Bearer token obtained)') + '\n')
         }
 
         // Collect data
@@ -353,7 +354,7 @@ export function registerSyncCommands(program: Command): void {
         }
         const period = sinceToPeriod[opts.since]
         if (!period) {
-          process.stderr.write(`Unknown --since value "${opts.since}". Valid: today, 7d, 30d, month, all.\n`)
+          process.stderr.write(t('Unknown --since value "%s". Valid: today, 7d, 30d, month, all.', opts.since) + '\n')
           process.exit(1)
         }
         const { range } = getDateRange(period)
@@ -397,14 +398,14 @@ export function registerSyncCommands(program: Command): void {
         if (opts.dryRun) {
           const toPushCount = Math.min(unsent.length, MAX_PER_PUSH)
           const cost = unsent.slice(0, MAX_PER_PUSH).reduce((s, c) => s + c.call.costUSD, 0)
-          process.stderr.write(`[dry-run] Window: ${opts.since} — ${allCalls.length} calls total, ${allCalls.length - unsent.length - held.length - frozen.length} already synced\n`)
+          process.stderr.write('[dry-run] ' + t('Window: %s — %d calls total, %d already synced', opts.since, allCalls.length, allCalls.length - unsent.length - held.length - frozen.length) + '\n')
           if (held.length > 0) {
-            process.stderr.write(`[dry-run] ${held.length} calls held: their session is still reconciling and its values can still change (#988). They push once it settles.\n`)
+            process.stderr.write('[dry-run] ' + t('%d calls held: their session is still reconciling and its values can still change (#988). They push once it settles.', held.length) + '\n')
           }
           if (frozen.length > 0) {
-            process.stderr.write(`[dry-run] ${frozen.length} Copilot calls frozen: their sessions were already synced in the other shape (rollup vs per-request), and a usage span cannot be retracted. See docs/sync/README.md.\n`)
+            process.stderr.write('[dry-run] ' + t('%d Copilot calls frozen: their sessions were already synced in the other shape (rollup vs per-request), and a usage span cannot be retracted. See docs/sync/README.md.', frozen.length) + '\n')
           }
-          process.stderr.write(`[dry-run] Would push ${toPushCount} calls ($${cost.toFixed(2)}) to ${config.baseUrl}${config.tracesPath}\n`)
+          process.stderr.write('[dry-run] ' + t('Would push %d calls ($%s) to %s', toPushCount, cost.toFixed(2), `${config.baseUrl}${config.tracesPath}`) + '\n')
           const toPushList = unsent.slice(0, MAX_PER_PUSH)
           const withLineage = toPushList.filter(c => c.session?.workUnitId !== undefined).length
           const withCacheTokens = toPushList.filter(c =>
@@ -412,7 +413,16 @@ export function registerSyncCommands(program: Command): void {
             || c.call.usage.cacheCreationInputTokens > 0).length
           const covered = toPushList.filter(c => c.session?.subscriptionCovered === true).length
           const uncovered = toPushList.filter(c => c.session?.subscriptionCovered === false).length
-          process.stderr.write(`[dry-run] Fields: ${withLineage}/${toPushCount} spans carry lineage (ai.work_unit_id/session_role/lineage_evidence), ${withCacheTokens} carry cache tokens, ai.subscription_covered true on ${covered} / false on ${uncovered} / omitted on ${toPushCount - covered - uncovered}; codeburn.coverage_through: ${coverageThrough ?? 'unavailable'}\n`)
+          process.stderr.write('[dry-run] ' + t(
+            'Fields: %d/%d spans carry lineage (ai.work_unit_id/session_role/lineage_evidence), %d carry cache tokens, ai.subscription_covered true on %d / false on %d / omitted on %d; codeburn.coverage_through: %s',
+            withLineage,
+            toPushCount,
+            withCacheTokens,
+            covered,
+            uncovered,
+            toPushCount - covered - uncovered,
+            coverageThrough ?? t('unavailable'),
+          ) + '\n')
 
           // Plugin socket disclosure (teams issue #3): a member sees every
           // loaded plugin and every declared sync attribute, so a plugin
@@ -424,12 +434,12 @@ export function registerSyncCommands(program: Command): void {
               const attrs = l.manifest.capabilities.syncAttributes
               return attrs.length > 0
                 ? `${l.manifest.name}@${l.manifest.version} [${attrs.map(a => `${a.key} - ${a.disclosure}`).join('; ')}]`
-                : `${l.manifest.name}@${l.manifest.version} (no sync attributes declared)`
+                : `${l.manifest.name}@${l.manifest.version} ` + t('(no sync attributes declared)')
             }).join(' | ')
-            process.stderr.write(`[dry-run] Plugins loaded: ${loadedPlugins.length} (${loadedSummary})\n`)
+            process.stderr.write('[dry-run] ' + t('Plugins loaded: %d (%s)', loadedPlugins.length, loadedSummary) + '\n')
             if (rejectedPlugins.length > 0) {
               const rejectedSummary = rejectedPlugins.map(l => `${l.name} (${l.reason})`).join('; ')
-              process.stderr.write(`[dry-run] Plugins rejected: ${rejectedPlugins.length} (${rejectedSummary})\n`)
+              process.stderr.write('[dry-run] ' + t('Plugins rejected: %d (%s)', rejectedPlugins.length, rejectedSummary) + '\n')
             }
           }
 
@@ -450,20 +460,20 @@ export function registerSyncCommands(program: Command): void {
             const exporterSummary = exporterPlugins.map(l => {
               const callCount = pluginEnrichmentDry.perCall.size
               const spanCount = pluginEnrichmentDry.extraSpans.length
-              return `${l.manifest.name} would contribute attributes for ${callCount} calls and ${spanCount} extra spans`
+              return t('%s would contribute attributes for %d calls and %d extra spans', l.manifest.name, callCount, spanCount)
             }).join('; ')
-            process.stderr.write(`[dry-run] Plugin exporters: ${exporterSummary}\n`)
+            process.stderr.write('[dry-run] ' + t('Plugin exporters: %s', exporterSummary) + '\n')
           }
           if (unsent.length > MAX_PER_PUSH) {
-            process.stderr.write(`[dry-run] ${unsent.length - MAX_PER_PUSH} more calls exceed the ${MAX_PER_PUSH} safety limit — a second push would be needed\n`)
+            process.stderr.write('[dry-run] ' + t('%d more calls exceed the %d safety limit — a second push would be needed', unsent.length - MAX_PER_PUSH, MAX_PER_PUSH) + '\n')
           }
           if (opts.attribution) {
             const toPushAttr = attributionUnsent.slice(0, MAX_ATTRIBUTION_PER_PUSH)
             const commits = toPushAttr.filter(i => i.kind === 'commit').length
             const sessions = toPushAttr.filter(i => i.kind === 'session').length
-            process.stderr.write(`[dry-run] Attribution: ${attributionTotal} facts total, would push ${toPushAttr.length} (${sessions} sessions, ${commits} commits)\n`)
+            process.stderr.write('[dry-run] ' + t('Attribution: %d facts total, would push %d (%d sessions, %d commits)', attributionTotal, toPushAttr.length, sessions, commits) + '\n')
             if (attributionUnsent.length > MAX_ATTRIBUTION_PER_PUSH) {
-              process.stderr.write(`[dry-run] ${attributionUnsent.length - MAX_ATTRIBUTION_PER_PUSH} more attribution facts exceed the ${MAX_ATTRIBUTION_PER_PUSH} safety limit — a second push would be needed\n`)
+              process.stderr.write('[dry-run] ' + t('%d more attribution facts exceed the %d safety limit — a second push would be needed', attributionUnsent.length - MAX_ATTRIBUTION_PER_PUSH, MAX_ATTRIBUTION_PER_PUSH) + '\n')
             }
           }
           return
@@ -471,12 +481,12 @@ export function registerSyncCommands(program: Command): void {
 
         if (unsent.length === 0 && attributionUnsent.length === 0) {
           const pendingNote = [
-            held.length > 0 ? `${held.length} held while their session is still reconciling` : '',
-            frozen.length > 0 ? `${frozen.length} frozen behind an already-synced rollup` : '',
+            held.length > 0 ? t('%d held while their session is still reconciling', held.length) : '',
+            frozen.length > 0 ? t('%d frozen behind an already-synced rollup', frozen.length) : '',
           ].filter(Boolean).join(', ')
-          process.stderr.write(pendingNote
-            ? `Nothing to push yet (${allCalls.length - held.length - frozen.length} calls already synced, ${pendingNote}).\n`
-            : `Nothing to push (${allCalls.length} calls already synced).\n`)
+          process.stderr.write((pendingNote
+            ? t('Nothing to push yet (%d calls already synced, %s).', allCalls.length - held.length - frozen.length, pendingNote)
+            : t('Nothing to push (%d calls already synced).', allCalls.length)) + '\n')
           updateLastSync()
           return
         }
@@ -484,7 +494,7 @@ export function registerSyncCommands(program: Command): void {
         // Safety valve (not a routine cap — pushes run to completion)
         const toPush = unsent.slice(0, MAX_PER_PUSH)
         if (unsent.length > MAX_PER_PUSH) {
-          process.stderr.write(`${unsent.length} unsent calls exceed the ${MAX_PER_PUSH} safety limit. Pushing first ${MAX_PER_PUSH}; run again to continue.\n`)
+          process.stderr.write(t('%d unsent calls exceed the %d safety limit. Pushing first %d; run again to continue.', unsent.length, MAX_PER_PUSH, MAX_PER_PUSH) + '\n')
         }
 
         // Batch and send (loops until done; waits out 429 rate limits)
@@ -513,14 +523,14 @@ export function registerSyncCommands(program: Command): void {
         }
 
         if (result.outcome === 'auth-rejected') {
-          process.stderr.write('Auth rejected by server. Run `codeburn sync setup` to re-authenticate.\n')
+          process.stderr.write(t('Auth rejected by server. Run `codeburn sync setup` to re-authenticate.') + '\n')
           process.exit(1)
         }
         if (result.outcome === 'rate-limited') {
-          process.stderr.write(`Rate limited — gave up after repeated retries. Remaining calls will be sent on the next push.\n`)
+          process.stderr.write(t('Rate limited — gave up after repeated retries. Remaining calls will be sent on the next push.') + '\n')
         }
         if (result.outcome === 'server-error') {
-          process.stderr.write(`Server error (HTTP ${result.httpStatus}). Remaining calls will be sent on the next push.\n`)
+          process.stderr.write(t('Server error (HTTP %s). Remaining calls will be sent on the next push.', result.httpStatus) + '\n')
         }
 
         // Attribution spans ride the same endpoint after the usage push
@@ -532,7 +542,7 @@ export function registerSyncCommands(program: Command): void {
             // Safety valve, mirroring the usage-call cap
             const attrToPush = attributionUnsent.slice(0, MAX_ATTRIBUTION_PER_PUSH)
             if (attributionUnsent.length > MAX_ATTRIBUTION_PER_PUSH) {
-              process.stderr.write(`${attributionUnsent.length} attribution facts exceed the ${MAX_ATTRIBUTION_PER_PUSH} safety limit. Pushing first ${MAX_ATTRIBUTION_PER_PUSH}; run again to continue.\n`)
+              process.stderr.write(t('%d attribution facts exceed the %d safety limit. Pushing first %d; run again to continue.', attributionUnsent.length, MAX_ATTRIBUTION_PER_PUSH, MAX_ATTRIBUTION_PER_PUSH) + '\n')
             }
             const attrBatches = batchAttributionItems(attrToPush, discoveryDoc.max_batch_size)
             attrResult = await sendAttributionBatches({
@@ -542,17 +552,17 @@ export function registerSyncCommands(program: Command): void {
               log: msg => process.stderr.write(`${msg}\n`),
             })
             if (attrResult.outcome === 'auth-rejected') {
-              process.stderr.write('Auth rejected by server during attribution push. Run `codeburn sync setup` to re-authenticate.\n')
+              process.stderr.write(t('Auth rejected by server during attribution push. Run `codeburn sync setup` to re-authenticate.') + '\n')
               process.exit(1)
             }
             if (attrResult.outcome === 'rate-limited') {
-              process.stderr.write(`Rate limited during attribution push — gave up after repeated retries. Remaining facts will be sent on the next push.\n`)
+              process.stderr.write(t('Rate limited during attribution push — gave up after repeated retries. Remaining facts will be sent on the next push.') + '\n')
             }
             if (attrResult.outcome === 'server-error') {
-              process.stderr.write(`Server error (HTTP ${attrResult.httpStatus}) during attribution push. Remaining facts will be sent on the next push.\n`)
+              process.stderr.write(t('Server error (HTTP %s) during attribution push. Remaining facts will be sent on the next push.', attrResult.httpStatus) + '\n')
             }
           } else {
-            process.stderr.write(`Skipping attribution push (${attributionUnsent.length} facts) — will retry on next push.\n`)
+            process.stderr.write(t('Skipping attribution push (%d facts) — will retry on next push.', attributionUnsent.length) + '\n')
           }
         }
 
@@ -560,18 +570,18 @@ export function registerSyncCommands(program: Command): void {
         updateLastSync()
 
         // Summary
-        process.stderr.write(`\nSynced ${result.totalSent} calls ($${result.totalCostSent.toFixed(2)}) to ${config.baseUrl}\n`)
+        process.stderr.write('\n' + t('Synced %d calls ($%s) to %s', result.totalSent, result.totalCostSent.toFixed(2), config.baseUrl) + '\n')
         if (attrResult) {
           const attrSuffix = attrResult.outcome !== 'complete'
-            ? ` (push incomplete — remainder retries next push)`
-            : attrResult.totalRejected > 0 ? `, ${attrResult.totalRejected} rejected (will retry)` : ''
-          process.stderr.write(`  Attribution: ${attrResult.totalSent} facts synced${attrSuffix}\n`)
+            ? ' ' + t('(push incomplete — remainder retries next push)')
+            : attrResult.totalRejected > 0 ? ', ' + t('%d rejected (will retry)', attrResult.totalRejected) : ''
+          process.stderr.write('  ' + t('Attribution: %d facts synced%s', attrResult.totalSent, attrSuffix) + '\n')
         }
         if (result.totalRejected > 0) {
-          process.stderr.write(`  ${result.totalRejected} spans rejected (will retry on next push)\n`)
+          process.stderr.write('  ' + t('%d spans rejected (will retry on next push)', result.totalRejected) + '\n')
         }
         if (unsent.length > MAX_PER_PUSH) {
-          process.stderr.write(`  ${unsent.length - MAX_PER_PUSH} calls remaining (safety limit). Run \`codeburn sync push\` again.\n`)
+          process.stderr.write('  ' + t('%d calls remaining (safety limit). Run `codeburn sync push` again.', unsent.length - MAX_PER_PUSH) + '\n')
         }
 
         // Non-zero exit when the push did not complete, so cron/scripts can
@@ -588,25 +598,25 @@ export function registerSyncCommands(program: Command): void {
   // --- auto (parent) ---
   const auto = sync
     .command('auto')
-    .description('Manage automatic scheduled pushes')
+    .description(t('Manage automatic scheduled pushes'))
 
   // --- auto enable ---
   auto
     .command('enable')
-    .description('Enable automatic scheduled pushes (requires --accept to proceed)')
-    .option('--cadence <cadence>', 'Schedule frequency: daily or hourly', 'daily')
-    .option('--attribution', 'Also send work-matching data (session-to-commit links)')
-    .option('--accept', 'Accept the disclosure and enable automatic sync')
+    .description(t('Enable automatic scheduled pushes (requires --accept to proceed)'))
+    .option('--cadence <cadence>', t('Schedule frequency: daily or hourly'), 'daily')
+    .option('--attribution', t('Also send work-matching data (session-to-commit links)'))
+    .option('--accept', t('Accept the disclosure and enable automatic sync'))
     .action(async (opts: { cadence?: string; attribution?: boolean; accept?: boolean }) => {
       const config = readSyncConfig()
       if (!config) {
-        process.stderr.write('Sync not configured. Run `codeburn sync setup <url>` first.\n')
+        process.stderr.write(t('Sync not configured. Run `codeburn sync setup <url>` first.') + '\n')
         process.exit(1)
       }
 
       const cadence = opts.cadence as 'daily' | 'hourly'
       if (cadence !== 'daily' && cadence !== 'hourly') {
-        process.stderr.write('Invalid --cadence. Use: daily or hourly\n')
+        process.stderr.write(t('Invalid --cadence. Use: daily or hourly') + '\n')
         process.exit(1)
       }
 
@@ -619,7 +629,7 @@ export function registerSyncCommands(program: Command): void {
 
         const fieldList = allKeys.map(key => {
           const plugin = pluginKeys.get(key)
-          const disclosure = plugin?.disclosure ?? CORE_SYNC_FIELD_MEANINGS.get(key) ?? '(no description)'
+          const disclosure = plugin?.disclosure ?? CORE_SYNC_FIELD_MEANINGS.get(key) ?? t('(no description)')
           return { key, disclosure }
         })
 
@@ -640,7 +650,7 @@ export function registerSyncCommands(program: Command): void {
         process.stdout.write(disclosure + '\n\n')
 
         if (!opts.accept) {
-          process.stderr.write('Re-run with --accept to consent to exactly this.\n')
+          process.stderr.write(t('Re-run with --accept to consent to exactly this.') + '\n')
           process.exit(1)
         }
 
@@ -660,12 +670,12 @@ export function registerSyncCommands(program: Command): void {
 
         try {
           await installSchedule(cadence, process.execPath, process.argv[1])
-          process.stdout.write(`Automatic sync enabled (${cadence}). Fingerprint: ${fingerprint}\n`)
+          process.stdout.write(t('Automatic sync enabled (%s). Fingerprint: %s', cadence, fingerprint) + '\n')
         } catch (schedErr) {
-          process.stderr.write(`Warning: ${(schedErr as Error).message}\n`)
-          process.stderr.write(`Acceptance was stored and will take effect, but the schedule could not be installed.\n`)
-          process.stderr.write(`Run: codeburn sync auto enable --cadence ${cadence} --attribution${opts.attribution ? '' : ''}\n`)
-          process.stderr.write(`Or install manually: launchctl load ~/Library/LaunchAgents/com.codeburn.sync-auto.plist\n`)
+          process.stderr.write(t('Warning: %s', (schedErr as Error).message) + '\n')
+          process.stderr.write(t('Acceptance was stored and will take effect, but the schedule could not be installed.') + '\n')
+          process.stderr.write(t('Run: codeburn sync auto enable --cadence %s --attribution', cadence) + '\n')
+          process.stderr.write(t('Or install manually: launchctl load ~/Library/LaunchAgents/com.codeburn.sync-auto.plist') + '\n')
           process.exit(1)
         }
       } catch (err) {
@@ -677,16 +687,16 @@ export function registerSyncCommands(program: Command): void {
   // --- auto disable ---
   auto
     .command('disable')
-    .description('Disable automatic scheduled pushes (kill switch)')
+    .description(t('Disable automatic scheduled pushes (kill switch)'))
     .action(async () => {
       const config = readSyncConfig()
       if (!config) {
-        process.stderr.write('Sync not configured.\n')
+        process.stderr.write(t('Sync not configured.') + '\n')
         return
       }
 
       if (!config.auto?.accepted) {
-        process.stdout.write('Automatic sync was not enabled.\n')
+        process.stdout.write(t('Automatic sync was not enabled.') + '\n')
         return
       }
 
@@ -699,14 +709,14 @@ export function registerSyncCommands(program: Command): void {
         // Best effort
       }
 
-      process.stdout.write('Automatic sync disabled.\n')
+      process.stdout.write(t('Automatic sync disabled.') + '\n')
     })
 
   // --- auto status ---
   auto
     .command('status')
-    .description('Show automatic sync status and recent receipts')
-    .option('--json', 'Output as machine-readable JSON')
+    .description(t('Show automatic sync status and recent receipts'))
+    .option('--json', t('Output as machine-readable JSON'))
     .action(async (opts: { json?: boolean }) => {
       const config = readSyncConfig()
 
@@ -763,34 +773,34 @@ export function registerSyncCommands(program: Command): void {
       }
 
       if (!config?.auto?.accepted) {
-        process.stdout.write('Automatic sync is not configured.\n')
+        process.stdout.write(t('Automatic sync is not configured.') + '\n')
         return
       }
 
       const acceptedRecord = config.auto.accepted
       if (typeof acceptedRecord.fingerprint !== 'string' || typeof acceptedRecord.acceptedAt !== 'string') {
-        process.stdout.write('Automatic sync acceptance record is damaged. Run: codeburn sync auto enable --cadence <daily|hourly> --accept\n')
+        process.stdout.write(t('Automatic sync acceptance record is damaged. Run: codeburn sync auto enable --cadence <daily|hourly> --accept') + '\n')
         process.exit(1)
         return
       }
 
-      process.stdout.write(`Accepted fingerprint: ${acceptedRecord.fingerprint}\n`)
-      process.stdout.write(`Accepted at: ${acceptedRecord.acceptedAt}\n`)
-      process.stdout.write(`Cadence: ${acceptedRecord.cadence}\n`)
+      process.stdout.write(t('Accepted fingerprint: %s', acceptedRecord.fingerprint) + '\n')
+      process.stdout.write(t('Accepted at: %s', acceptedRecord.acceptedAt) + '\n')
+      process.stdout.write(t('Cadence: %s', acceptedRecord.cadence) + '\n')
 
       if (currentMatches === true) {
-        process.stdout.write('Current fingerprint: MATCHES\n')
+        process.stdout.write(t('Current fingerprint: MATCHES') + '\n')
       } else if (currentMatches === false) {
-        process.stdout.write(`Current fingerprint: DIFFERS (${changed.join(', ')})\n`)
+        process.stdout.write(t('Current fingerprint: DIFFERS (%s)', changed.join(', ')) + '\n')
       } else {
-        process.stdout.write('Current fingerprint: unable to recompute\n')
+        process.stdout.write(t('Current fingerprint: unable to recompute') + '\n')
       }
 
-      process.stdout.write(`Killed: ${config.auto.killed ? 'yes' : 'no'}\n`)
+      process.stdout.write(t('Killed: %s', config.auto.killed ? t('yes') : t('no')) + '\n')
 
       const receipts = readReceipts(5)
       if (receipts.length > 0) {
-        process.stdout.write('\nLast 5 receipts:\n')
+        process.stdout.write('\n' + t('Last 5 receipts:') + '\n')
         for (const r of receipts) {
           process.stdout.write(`  ${r.at} - ${r.result}\n`)
         }
@@ -800,7 +810,7 @@ export function registerSyncCommands(program: Command): void {
   // --- auto run ---
   auto
     .command('run')
-    .description('Run automatic push (invoked by scheduler)')
+    .description(t('Run automatic push (invoked by scheduler)'))
     .action(async () => {
       const config = readSyncConfig()
       const at = new Date().toISOString()

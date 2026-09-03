@@ -13,6 +13,8 @@ import { parseJsonlLine, shouldSkipLine } from './parser.js'
 import type { DateRange, ProjectSummary, SessionSummary } from './types.js'
 import { formatCost } from './currency.js'
 import { formatTokens } from './format.js'
+import { displayWidth, padCells, periodLabelForDisplay } from './format.js'
+import { t, tn } from './i18n.js'
 import { recommendModelDefault, type ModelDefaultRecommendation } from './act/model-defaults.js'
 import { appliedFixGlyph, formatAppliedFix, type AppliedFix } from './act/types.js'
 import { isUserStartedSession, userStartedProjects } from './session-population.js'
@@ -279,21 +281,21 @@ export function optimizeRemediationCopy(provider?: string): OptimizeRemediationC
 }
 
 export function sessionOpenerLabel(copy: OptimizeRemediationCopy): string {
-  return `Paste at the start of your NEXT expensive thread (one-time, do not add to ${copy.instructionFile}):`
+  return t('Paste at the start of your NEXT expensive thread (one-time, do not add to %s):', copy.instructionFile)
 }
 
 export function askAgentLabel(copy: OptimizeRemediationCopy, rest: string): string {
-  return `Ask ${copy.agent} to ${rest}:`
+  return t('Ask %1$s to %2$s:', copy.agent, rest)
 }
 
 export function optimizePasteHeader(destination: PasteDestination | undefined, copy: OptimizeRemediationCopy): string {
   switch (destination) {
-    case 'claude-md':      return `Suggested ${copy.instructionFile} addition (permanent rule)`
-    case 'session-opener': return `One-time session opener (do NOT add to ${copy.instructionFile})`
-    case 'prompt':         return `Ask ${copy.agent} in the current session`
-    case 'shell-config':   return 'Add to your shell config'
-    case 'manual':         return 'Manual action'
-    default:               return 'Suggested action'
+    case 'claude-md':      return t('Suggested %s addition (permanent rule)', copy.instructionFile)
+    case 'session-opener': return t('One-time session opener (do NOT add to %s)', copy.instructionFile)
+    case 'prompt':         return t('Ask %s in the current session', copy.agent)
+    case 'shell-config':   return t('Add to your shell config')
+    case 'manual':         return t('Manual action')
+    default:               return t('Suggested action')
   }
 }
 
@@ -302,23 +304,23 @@ export function optimizePasteHeader(destination: PasteDestination | undefined, c
 export function optimizeTuiPasteHeader(destination: PasteDestination | undefined, provider?: string): string {
   if (isDefaultClaudeProvider(provider)) {
     switch (destination) {
-      case 'claude-md':      return '── Suggested CLAUDE.md addition (permanent rule) '.padEnd(64, '─')
-      case 'session-opener': return '── One-time session opener (do not add to CLAUDE.md) '.padEnd(64, '─')
-      case 'prompt':         return '── Ask Claude in the current session '.padEnd(64, '─')
-      case 'shell-config':   return '── Add to your shell config '.padEnd(64, '─')
-      case 'manual':         return '── Manual action '.padEnd(64, '─')
-      default:               return '── Suggested action '.padEnd(64, '─')
+      case 'claude-md':      return padCells(`── ${t('Suggested CLAUDE.md addition (permanent rule)')} `, 64, '─')
+      case 'session-opener': return padCells(`── ${t('One-time session opener (do not add to CLAUDE.md)')} `, 64, '─')
+      case 'prompt':         return padCells(`── ${t('Ask Claude in the current session')} `, 64, '─')
+      case 'shell-config':   return padCells(`── ${t('Add to your shell config')} `, 64, '─')
+      case 'manual':         return padCells(`── ${t('Manual action')} `, 64, '─')
+      default:               return padCells(`── ${t('Suggested action')} `, 64, '─')
     }
   }
-  return `── ${optimizePasteHeader(destination, optimizeRemediationCopy(provider))} `.padEnd(64, '─')
+  return padCells(`── ${optimizePasteHeader(destination, optimizeRemediationCopy(provider))} `, 64, '─')
 }
 
 export function optimizeEmptyScanLines(provider?: string): [string, string, string] {
   if (isDefaultClaudeProvider(provider)) {
     return [
-      'CodeBurn optimize scans your Claude Code sessions and config for',
-      'token waste: junk directory reads, duplicate file reads, unused',
-      'agents/skills/MCP servers, bloated CLAUDE.md, and more.',
+      t('CodeBurn optimize scans your Claude Code sessions and config for'),
+      t('token waste: junk directory reads, duplicate file reads, unused'),
+      t('agents/skills/MCP servers, bloated CLAUDE.md, and more.'),
     ]
   }
   const copy = optimizeRemediationCopy(provider)
@@ -326,9 +328,9 @@ export function optimizeEmptyScanLines(provider?: string): [string, string, stri
   // would claim a scan that did not run (Health A / 100 under --provider
   // codex with every listed detector claudeOnly-disabled).
   return [
-    `Session-scan detectors do not cover ${copy.agent} yet.`,
-    'junk directory reads, duplicate file reads, unused agents/skills/MCP,',
-    'and bloated instruction files currently scan Claude Code only.',
+    t('Session-scan detectors do not cover %s yet.', copy.agent),
+    t('junk directory reads, duplicate file reads, unused agents/skills/MCP,'),
+    t('and bloated instruction files currently scan Claude Code only.'),
   ]
 }
 
@@ -508,7 +510,8 @@ export function classTotals(findings: WasteFinding[], costRate: number): Record<
 export function classHeaderLine(cls: FindingClass, totals: ClassTotals, costRate: number): string {
   const cost = costRate > 0 ? ` (~${formatCost(totals.savingsUSD)})` : ''
   const suffix = cls === 'fix' ? ' — codeburn optimize --apply' : ''
-  return `${CLASS_HEADERS[cls]} · ~${formatTokens(totals.tokensSaved)} tokens${cost} · ${totals.count} finding${totals.count === 1 ? '' : 's'}${suffix}`
+  const count = tn('%d finding', '%d findings', totals.count)
+  return `${t(CLASS_HEADERS[cls])} · ~${formatTokens(totals.tokensSaved)} tokens${cost} · ${count}${suffix}`
 }
 
 // Cause taxonomy for defer-enable plans (mcp-deferral-off findings).
@@ -1066,15 +1069,15 @@ export function detectJunkReads(calls: ToolCall[], dateRange?: DateRange): Waste
 
   return {
     id: 'build-folder-reads',
-    title: 'Claude is reading build/dependency folders',
-    explanation: `Claude read into ${dirList} (${totalJunkReads} reads). These are generated or dependency directories, not your code. Tell Claude in CLAUDE.md to avoid them.`,
+    title: t('Claude is reading build/dependency folders'),
+    explanation: t('Claude read into %1$s (%2$d reads). These are generated or dependency directories, not your code. Tell Claude in CLAUDE.md to avoid them.', dirList, totalJunkReads),
     impact: totalJunkReads > JUNK_READS_HIGH_THRESHOLD ? 'high' : totalJunkReads > JUNK_READS_MEDIUM_THRESHOLD ? 'medium' : 'low',
     tokensSaved,
     fix: {
       type: 'paste',
       destination: 'claude-md',
-      label: 'Append to your project CLAUDE.md:',
-      text: `Do not read or search files under these directories unless I explicitly ask: ${dirsToAvoid}.`,
+      label: t('Append to your project CLAUDE.md:'),
+      text: t('Do not read or search files under these directories unless I explicitly ask: %s.', dirsToAvoid),
     },
     trend,
   }
@@ -1132,15 +1135,15 @@ export function detectDuplicateReads(calls: ToolCall[], dateRange?: DateRange): 
 
   return {
     id: 'redundant-rereads',
-    title: 'Claude is re-reading the same files',
-    explanation: `${totalDuplicates} redundant re-reads across sessions. Top repeats: ${worst}. Each re-read loads the same content into context again.`,
+    title: t('Claude is re-reading the same files'),
+    explanation: t('%1$d redundant re-reads across sessions. Top repeats: %2$s. Each re-read loads the same content into context again.', totalDuplicates, worst),
     impact: totalDuplicates > DUPLICATE_READS_HIGH_THRESHOLD ? 'high' : totalDuplicates > DUPLICATE_READS_MEDIUM_THRESHOLD ? 'medium' : 'low',
     tokensSaved,
     fix: {
       type: 'paste',
       destination: 'prompt',
-      label: 'Point Claude at exact locations in your prompt, for example:',
-      text: 'In <file> lines <start>-<end>, look at the <function> function.',
+      label: t('Point Claude at exact locations in your prompt, for example:'),
+      text: t('In <file> lines <start>-<end>, look at the <function> function.'),
     },
     trend,
   }
@@ -1478,9 +1481,12 @@ export function detectMcpToolCoverage(
     unusedToolsByServer[c.server] = c.unusedTools
     flaggedServers.push(c.server)
     const pct = Math.round(c.coverageRatio * 100)
-    lines.push(
-      `${c.server}: ${c.toolsInvoked}/${c.toolsAvailable} tools used (${pct}% coverage) across ${c.loadedSessions} session${c.loadedSessions === 1 ? '' : 's'}`,
-    )
+    lines.push(tn(
+      '%1$s: %2$d/%3$d tools used (%4$d%% coverage) across %5$d session',
+      '%1$s: %2$d/%3$d tools used (%4$d%% coverage) across %5$d sessions',
+      c.loadedSessions,
+      c.server, c.toolsInvoked, c.toolsAvailable, pct, c.loadedSessions,
+    ))
     if (c.server.startsWith('claude_ai_') && !localServerNames.has(c.server)) {
       connectorServers.push(c.server)
     } else {
@@ -1523,27 +1529,35 @@ export function detectMcpToolCoverage(
     `${connectorLabels[index]} (${server})`,
   )
   const connectorGuidance = connectorServers.length > 0
-    ? ` ${connectorEvidence.join(', ')} ${one ? 'is a claude.ai connector namespace' : 'are claude.ai connector namespaces'}, separate from any similarly named local MCP server. Transcript inventory is aggregated across the selected projects; use /mcp in each project where ${one ? 'it loads' : 'they load'}, or manage ${one ? 'it' : 'them'} in claude.ai Settings > Connectors.`
+    ? ' ' + (one
+      ? t('%s is a claude.ai connector namespace, separate from any similarly named local MCP server. Transcript inventory is aggregated across the selected projects; use /mcp in each project where it loads, or manage it in claude.ai Settings > Connectors.', connectorEvidence.join(', '))
+      : t('%s are claude.ai connector namespaces, separate from any similarly named local MCP server. Transcript inventory is aggregated across the selected projects; use /mcp in each project where they load, or manage them in claude.ai Settings > Connectors.', connectorEvidence.join(', ')))
     : ''
   const oneAmbiguous = ambiguousServers.length === 1
   const ambiguousNote = ambiguousServers.length > 0
-    ? `If you also use ${oneAmbiguous ? 'a claude.ai connector' : 'claude.ai connectors'} named ${ambiguousServers.join(', ')}, manage ${oneAmbiguous ? 'it' : 'them'} with /mcp or in claude.ai Settings > Connectors.`
+    ? (oneAmbiguous
+      ? t('If you also use a claude.ai connector named %s, manage it with /mcp or in claude.ai Settings > Connectors.', ambiguousServers.join(', '))
+      : t('If you also use claude.ai connectors named %s, manage them with /mcp or in claude.ai Settings > Connectors.', ambiguousServers.join(', ')))
     : ''
   const ambiguousGuidance = ambiguousServers.length > 0
-    ? ` ${ambiguousServers.join(', ')} ${oneAmbiguous ? 'is a local MCP config entry whose name matches' : 'are local MCP config entries whose names match'} the claude.ai connector namespace, so the removal below edits local config only. ${ambiguousNote}`
+    ? ' ' + (oneAmbiguous
+      ? t('%1$s is a local MCP config entry whose name matches the claude.ai connector namespace, so the removal below edits local config only. %2$s', ambiguousServers.join(', '), ambiguousNote)
+      : t('%1$s are local MCP config entries whose names match the claude.ai connector namespace, so the removal below edits local config only. %2$s', ambiguousServers.join(', '), ambiguousNote))
     : ''
   const connectorText = [
     connectorServers.length > 0
-      ? `Open /mcp in each affected project and disable ${connectorLabels.join(', ')}, or manage ${one ? 'it' : 'them'} in claude.ai Settings > Connectors.`
+      ? (one
+        ? t('Open /mcp in each affected project and disable %s, or manage it in claude.ai Settings > Connectors.', connectorLabels.join(', '))
+        : t('Open /mcp in each affected project and disable %s, or manage them in claude.ai Settings > Connectors.', connectorLabels.join(', ')))
       : '',
     ambiguousNote,
   ].filter(Boolean).join(' ')
   const connectorAction = connectorText
     ? {
         label: connectorServers.length === 0
-          ? 'Check for a same-name claude.ai connector:'
-          : one ? 'Manage the underused claude.ai connector where it loads:'
-            : 'Manage the underused claude.ai connectors where they load:',
+          ? t('Check for a same-name claude.ai connector:')
+          : one ? t('Manage the underused claude.ai connector where it loads:')
+            : t('Manage the underused claude.ai connectors where they load:'),
         text: connectorText,
       }
     : undefined
@@ -1551,8 +1565,8 @@ export function detectMcpToolCoverage(
     ? {
         type: 'command',
         label: localServers.length === 1
-          ? 'Remove the underused local server, or trim its tools in your MCP config:'
-          : 'Remove underused local servers, or trim their tools in your MCP config:',
+          ? t('Remove the underused local server, or trim its tools in your MCP config:')
+          : t('Remove underused local servers, or trim their tools in your MCP config:'),
         text: removeCommands.join('\n'),
       }
     : {
@@ -1564,11 +1578,11 @@ export function detectMcpToolCoverage(
 
   return {
     id: 'mcp-low-coverage',
-    title: `${flagged.length} MCP server${flagged.length === 1 ? '' : 's'} with low tool coverage`,
-    explanation:
-      `Schema for unused tools is loaded into the system prompt every session and ` +
-      `carried in the cached prefix on every turn. ` +
-      `${lines.join('; ')}.${connectorGuidance}${ambiguousGuidance}`,
+    title: tn('%d MCP server with low tool coverage', '%d MCP servers with low tool coverage', flagged.length),
+    explanation: t(
+      'Schema for unused tools is loaded into the system prompt every session and carried in the cached prefix on every turn. %1$s.%2$s%3$s',
+      lines.join('; '), connectorGuidance, ambiguousGuidance,
+    ),
     impact,
     tokensSaved,
     ...(applyTokensSaved !== undefined ? { applyTokensSaved } : {}),
@@ -1787,16 +1801,19 @@ export function detectMcpProfileAdvisor(
   const lines = preview.map(candidate => {
     const hot = candidate.hotProjects
       .slice(0, 2)
-      .map(p => `${p.projectPath} (${p.invocations} call${p.invocations === 1 ? '' : 's'})`)
+      .map(p => tn('%1$s (%2$d call)', '%1$s (%2$d calls)', p.invocations, p.projectPath, p.invocations))
       .join(', ')
     const cold = candidate.coldProjects
       .slice(0, 3)
-      .map(p => `${p.projectPath} (${p.loadedSessions} loaded session${p.loadedSessions === 1 ? '' : 's'})`)
+      .map(p => tn('%1$s (%2$d loaded session)', '%1$s (%2$d loaded sessions)', p.loadedSessions, p.projectPath, p.loadedSessions))
       .join(', ')
-    const coldExtra = candidate.coldProjects.length > 3 ? `, +${candidate.coldProjects.length - 3} more` : ''
-    return `${candidate.server}: ${Math.round(candidate.hotShare * 100)}% of ${candidate.invocations} calls in ${hot}; loaded but unused in ${cold}${coldExtra}`
+    const coldExtra = candidate.coldProjects.length > 3 ? t(', +%d more', candidate.coldProjects.length - 3) : ''
+    return t(
+      '%1$s: %2$d%% of %3$d calls in %4$s; loaded but unused in %5$s%6$s',
+      candidate.server, Math.round(candidate.hotShare * 100), candidate.invocations, hot, cold, coldExtra,
+    )
   })
-  const extra = candidates.length > preview.length ? `; +${candidates.length - preview.length} more` : ''
+  const extra = candidates.length > preview.length ? t('; +%d more', candidates.length - preview.length) : ''
   const serverToolCounts = new Map(candidates.map(c => [c.server, c.toolsAvailable]))
   const coldProjectKeysByServer = new Map(candidates.map(c => [c.server, c.coldProjectKeys]))
   const combinedCost = estimateMcpProfileColdSchemaCost(projects, serverToolCounts, coldProjectKeysByServer)
@@ -1808,22 +1825,26 @@ export function detectMcpProfileAdvisor(
 
   return {
     id: 'mcp-project-scope',
-    title: `${candidates.length} MCP server${candidates.length === 1 ? '' : 's'} should be project-scoped`,
-    explanation:
-      `These MCP servers look useful in a small set of projects but are loaded into other projects where they are not invoked. ` +
-      `Project-scoping them keeps the hot-project workflow while avoiding schema overhead elsewhere. ${lines.join('; ')}${extra}.`,
+    title: tn('%d MCP server should be project-scoped', '%d MCP servers should be project-scoped', candidates.length),
+    explanation: t(
+      'These MCP servers look useful in a small set of projects but are loaded into other projects where they are not invoked. Project-scoping them keeps the hot-project workflow while avoiding schema overhead elsewhere. %1$s%2$s.',
+      lines.join('; '), extra,
+    ),
     impact,
     tokensSaved,
     fix: {
       type: 'paste',
       destination: 'prompt',
-      label: askAgentLabel(optimizeRemediationCopy(provider), 'turn this into a project-scoped MCP profile'),
+      label: askAgentLabel(optimizeRemediationCopy(provider), t('turn this into a project-scoped MCP profile')),
       text: [
-        `Review these MCP profile recommendations before changing config (${preview.length} of ${candidates.length} shown):`,
+        t('Review these MCP profile recommendations before changing config (%1$d of %2$d shown):', preview.length, candidates.length),
         ...preview.map(candidate => {
           const hot = candidate.hotProjects.map(p => p.projectPath).join(', ')
           const cold = candidate.coldProjects.slice(0, 3).map(p => p.projectPath).join(', ')
-          return `- Keep ${candidate.server} available for ${hot}; remove or project-scope it away from ${cold}. Re-add it only in projects that actually need it.`
+          return t(
+            '- Keep %1$s available for %2$s; remove or project-scope it away from %3$s. Re-add it only in projects that actually need it.',
+            candidate.server, hot, cold,
+          )
         }),
       ].join('\n'),
     },
@@ -1873,7 +1894,7 @@ function capabilityKey(ref: CapabilityRef): string {
 }
 
 function formatCapabilityKind(kind: CapabilityKind): string {
-  return kind === 'mcp' ? 'MCP server' : 'skill'
+  return kind === 'mcp' ? t('MCP server') : t('skill')
 }
 
 function mcpServerFromToolName(fqn: string): string | null {
@@ -2039,10 +2060,15 @@ export function detectCapabilityReliability(projects: ProjectSummary[], provider
   const preview = candidates.slice(0, CAPABILITY_RELIABILITY_PREVIEW)
   const list = preview.map(c => {
     const percent = Math.round(c.retryRate * 100)
-    const projects = c.projects.length > 1 ? ` across ${c.projects.length} projects` : ` in ${c.projects[0] ?? 'one project'}`
-    return `${formatCapabilityKind(c.kind)} ${c.name}: ${c.retryTurns}/${c.editTurns} edit turns retried (${percent}%), ${c.retries} retries${projects}`
+    const projects = c.projects.length > 1
+      ? ' ' + t('across %d projects', c.projects.length)
+      : ' ' + t('in %s', c.projects[0] ?? t('one project'))
+    return t(
+      '%1$s %2$s: %3$d/%4$d edit turns retried (%5$d%%), %6$d retries%7$s',
+      formatCapabilityKind(c.kind), c.name, c.retryTurns, c.editTurns, percent, c.retries, projects,
+    )
   }).join('; ')
-  const extra = candidates.length > preview.length ? `; +${candidates.length - preview.length} more` : ''
+  const extra = candidates.length > preview.length ? t('; +%d more', candidates.length - preview.length) : ''
 
   const names = preview
     .map(c => `${formatCapabilityKind(c.kind)} ${c.name}`)
@@ -2058,23 +2084,26 @@ export function detectCapabilityReliability(projects: ProjectSummary[], provider
   }
 
   const kindSet = new Set(candidates.map(c => c.kind))
-  const noun = kindSet.size === 1
+  // Noun keys stay English here so the plural key can be derived; both forms
+  // are translated at the point they enter the title.
+  const nounKey = kindSet.size === 1
     ? (kindSet.has('mcp') ? 'MCP server' : 'skill')
     : 'MCP/skill capability'
-  const pluralNoun = noun === 'MCP/skill capability' ? 'MCP/skill capabilities' : `${noun}s`
-  const verb = candidates.length === 1 ? 'correlates' : 'correlate'
+  const pluralKey = nounKey === 'MCP/skill capability' ? 'MCP/skill capabilities' : `${nounKey}s`
 
   return {
     id: 'retry-heavy-capabilities',
-    title: `${candidates.length} ${candidates.length === 1 ? noun : pluralNoun} ${verb} with retry-heavy edits`,
-    explanation: `Edit turns using these capabilities are retry-heavy: ${list}${extra}. This is a correlation report, not proof of causation; compare the retry-heavy turns with one-shot turns before changing MCP scope or skill instructions.`,
+    title: candidates.length === 1
+      ? t('%1$d %2$s correlates with retry-heavy edits', candidates.length, t(nounKey))
+      : t('%1$d %2$s correlate with retry-heavy edits', candidates.length, t(pluralKey)),
+    explanation: t('Edit turns using these capabilities are retry-heavy: %1$s%2$s. This is a correlation report, not proof of causation; compare the retry-heavy turns with one-shot turns before changing MCP scope or skill instructions.', list, extra),
     impact,
     tokensSaved,
     fix: {
       type: 'paste',
       destination: 'prompt',
-      label: askAgentLabel(optimizeRemediationCopy(provider), 'audit the retry-heavy capability before changing config'),
-      text: `Investigate these retry-correlated capabilities: ${names}. Compare edit turns with retries against one-shot edit turns, identify whether the MCP server or skill actually caused rework, then propose a scoped MCP config or skill-instruction change with session evidence. Do not remove a capability solely because it appears in this report.`,
+      label: askAgentLabel(optimizeRemediationCopy(provider), t('audit the retry-heavy capability before changing config')),
+      text: t('Investigate these retry-correlated capabilities: %s. Compare edit turns with retries against one-shot edit turns, identify whether the MCP server or skill actually caused rework, then propose a scoped MCP config or skill-instruction change with session evidence. Do not remove a capability solely because it appears in this report.', names),
     },
   }
 }
@@ -2133,14 +2162,14 @@ export function detectUnusedMcp(
 
   return {
     id: 'unused-mcp',
-    title: `${unused.length} MCP server${unused.length > 1 ? 's' : ''} configured but never used`,
-    explanation: `Never called in this period: ${unused.join(', ')}. Each server loads ~${TOOLS_PER_MCP_SERVER * TOKENS_PER_MCP_TOOL} tokens of tool schema into every session.`,
+    title: tn('%d MCP server configured but never used', '%d MCP servers configured but never used', unused.length),
+    explanation: t('Never called in this period: %1$s. Each server loads ~%2$d tokens of tool schema into every session.', unused.join(', '), TOOLS_PER_MCP_SERVER * TOKENS_PER_MCP_TOOL),
     impact: unused.length >= UNUSED_MCP_HIGH_THRESHOLD ? 'high' : 'medium',
     tokensSaved,
     apply: { kind: 'mcp-remove', servers: unused },
     fix: {
       type: 'command',
-      label: `Remove unused server${unused.length > 1 ? 's' : ''}:`,
+      label: tn('Remove unused server:', 'Remove unused servers:', unused.length),
       text: unused.map(s => `claude mcp remove ${s}`).join('\n'),
     },
   }
@@ -2206,6 +2235,15 @@ export function findDeferralEnvSetting(
     if (match) return { value: match[1]!, scope: SHELL_PROFILE_SCOPE, path }
   }
   return null
+}
+
+/// Display label for a settings scope. The scope strings themselves stay
+/// English: they are stored in `apply.settingScope` and compared against
+/// SHELL_PROFILE_SCOPE, so only the rendered copy is translated. Keys:
+/// 'project local settings', 'project settings', 'user local settings',
+/// 'user settings', 'shell profile'.
+function scopeLabel(scope: string): string {
+  return t(scope)
 }
 
 function isEnvValueFalse(value: string): boolean {
@@ -2287,12 +2325,18 @@ function attributeDeferralOffCause(
 ): { cause: string; fix: WasteAction; apply?: FindingApply } {
   if (enableToolSearch && isEnvValueFalse(enableToolSearch.value)) {
     return {
-      cause: `Cause: ${ENABLE_TOOL_SEARCH_VAR}=${enableToolSearch.value} is set in ${enableToolSearch.scope} (${shortHomePath(enableToolSearch.path)}), forcing all tool definitions upfront.`,
+      cause: t(
+        'Cause: %1$s=%2$s is set in %3$s (%4$s), forcing all tool definitions upfront.',
+        ENABLE_TOOL_SEARCH_VAR, enableToolSearch.value, scopeLabel(enableToolSearch.scope), shortHomePath(enableToolSearch.path),
+      ),
       fix: {
         type: 'paste',
         destination: 'prompt',
-        label: 'Ask Claude to remove the stale override:',
-        text: `Remove the ${ENABLE_TOOL_SEARCH_VAR}=${enableToolSearch.value} setting from ${enableToolSearch.path}. Tool search is on by default on first-party endpoints, so deleting the override re-enables MCP tool deferral.`,
+        label: t('Ask Claude to remove the stale override:'),
+        text: t(
+          'Remove the %1$s=%2$s setting from %3$s. Tool search is on by default on first-party endpoints, so deleting the override re-enables MCP tool deferral.',
+          ENABLE_TOOL_SEARCH_VAR, enableToolSearch.value, enableToolSearch.path,
+        ),
       },
       apply: { kind: 'defer-enable', cause: 'env-false', settingPath: enableToolSearch.path, settingScope: enableToolSearch.scope, value: enableToolSearch.value },
     }
@@ -2300,11 +2344,14 @@ function attributeDeferralOffCause(
   const baseUrl = findDeferralEnvSetting(ANTHROPIC_BASE_URL_VAR, projectCwds, homeDir)
   if (baseUrl && !isFirstPartyBaseUrl(baseUrl.value)) {
     return {
-      cause: `Cause: ${ANTHROPIC_BASE_URL_VAR} points at a non-first-party host in ${baseUrl.scope} (${shortHomePath(baseUrl.path)}). Tool deferral silently auto-disables behind proxies because most don't forward tool_reference blocks; whether this proxy can is unknown.`,
+      cause: t(
+        'Cause: %1$s points at a non-first-party host in %2$s (%3$s). Tool deferral silently auto-disables behind proxies because most don\'t forward tool_reference blocks; whether this proxy can is unknown.',
+        ANTHROPIC_BASE_URL_VAR, scopeLabel(baseUrl.scope), shortHomePath(baseUrl.path),
+      ),
       fix: {
         type: 'paste',
         destination: 'shell-config',
-        label: `Verify your proxy forwards tool_reference blocks first (an explicit override fails on proxies that don't), then force tool search back on with:`,
+        label: t('Verify your proxy forwards tool_reference blocks first (an explicit override fails on proxies that don\'t), then force tool search back on with:'),
         text: `export ${ENABLE_TOOL_SEARCH_VAR}=true`,
       },
       apply: { kind: 'defer-enable', cause: 'proxy-unknown', settingPath: baseUrl.path, settingScope: baseUrl.scope, value: baseUrl.value },
@@ -2313,11 +2360,14 @@ function attributeDeferralOffCause(
   const vertex = findDeferralEnvSetting(CLAUDE_CODE_USE_VERTEX_VAR, projectCwds, homeDir)
   if (vertex && !isEnvValueFalse(vertex.value)) {
     return {
-      cause: `Cause: ${CLAUDE_CODE_USE_VERTEX_VAR} is set in ${vertex.scope} (${shortHomePath(vertex.path)}), and tool search is disabled by default on Vertex AI.`,
+      cause: t(
+        'Cause: %1$s is set in %2$s (%3$s), and tool search is disabled by default on Vertex AI.',
+        CLAUDE_CODE_USE_VERTEX_VAR, scopeLabel(vertex.scope), shortHomePath(vertex.path),
+      ),
       fix: {
         type: 'paste',
         destination: 'shell-config',
-        label: 'Opt in to tool search on Vertex (disabled by default there):',
+        label: t('Opt in to tool search on Vertex (disabled by default there):'),
         text: `export ${ENABLE_TOOL_SEARCH_VAR}=true`,
       },
       apply: { kind: 'defer-enable', cause: 'vertex', settingPath: vertex.path, settingScope: vertex.scope, value: vertex.value },
@@ -2326,10 +2376,10 @@ function attributeDeferralOffCause(
   const versions = apiCalls.map(c => c.version).filter(v => v.length > 0)
   if (versions.length > 0 && versions.every(v => versionPredates(v, TOOL_SEARCH_DEFAULT_ON_VERSION))) {
     return {
-      cause: `Cause: every observed Claude Code version in this period predates v${TOOL_SEARCH_DEFAULT_ON_VERSION}, where MCP tool search became on by default.`,
+      cause: t('Cause: every observed Claude Code version in this period predates v%s, where MCP tool search became on by default.', TOOL_SEARCH_DEFAULT_ON_VERSION),
       fix: {
         type: 'command',
-        label: 'Update Claude Code to get default-on MCP tool deferral:',
+        label: t('Update Claude Code to get default-on MCP tool deferral:'),
         text: 'claude update',
       },
       apply: { kind: 'defer-enable', cause: 'old-version' },
@@ -2340,21 +2390,27 @@ function attributeDeferralOffCause(
   // would be redundant.
   if (enableToolSearch) {
     return {
-      cause: `Cause: none determinable — ${ENABLE_TOOL_SEARCH_VAR}=${enableToolSearch.value} is already set in ${enableToolSearch.scope} (${shortHomePath(enableToolSearch.path)}), yet transcripts show no deferral activity.`,
+      cause: t(
+        'Cause: none determinable — %1$s=%2$s is already set in %3$s (%4$s), yet transcripts show no deferral activity.',
+        ENABLE_TOOL_SEARCH_VAR, enableToolSearch.value, scopeLabel(enableToolSearch.scope), shortHomePath(enableToolSearch.path),
+      ),
       fix: {
         type: 'paste',
         destination: 'prompt',
-        label: 'The override is already on; ask Claude to investigate why deferral is still inactive:',
-        text: `${ENABLE_TOOL_SEARCH_VAR}=${enableToolSearch.value} is set in ${enableToolSearch.path}, but sessions show no ToolSearch calls and no deferred-tool inventory. Check whether requests pass through a proxy that strips tool_reference blocks and whether the running Claude Code version supports tool search.`,
+        label: t('The override is already on; ask Claude to investigate why deferral is still inactive:'),
+        text: t(
+          '%1$s=%2$s is set in %3$s, but sessions show no ToolSearch calls and no deferred-tool inventory. Check whether requests pass through a proxy that strips tool_reference blocks and whether the running Claude Code version supports tool search.',
+          ENABLE_TOOL_SEARCH_VAR, enableToolSearch.value, enableToolSearch.path,
+        ),
       },
     }
   }
   return {
-    cause: `Cause: none determinable from config — no disabling override, proxy, or Vertex setting found.`,
+    cause: t('Cause: none determinable from config — no disabling override, proxy, or Vertex setting found.'),
     fix: {
       type: 'paste',
       destination: 'shell-config',
-      label: 'Deferral is on by default on first-party endpoints; to force it explicitly, add:',
+      label: t('Deferral is on by default on first-party endpoints; to force it explicitly, add:'),
       text: `export ${ENABLE_TOOL_SEARCH_VAR}=true`,
     },
   }
@@ -2433,19 +2489,25 @@ export function detectMcpDeferralOff(
   // Pluralize on the rendered value so 0.98 and 1.0 read consistently.
   const callRateText = callRate.toFixed(1)
 
-  const evidence =
-    `~${formatTokens(perSessionSchemaTokens)} tokens of MCP tool schema ` +
-    `(${servers.size} server${servers.size === 1 ? '' : 's'} at ~${formatTokens(perServerSchemaTokens)} tokens/server) sit in the prompt prefix of ` +
-    `${affectedSessions} session${affectedSessions === 1 ? '' : 's'} at ` +
-    `${callRateText} MCP call${callRateText === '1.0' ? '' : 's'}/session, with zero ToolSearch calls ` +
-    `and no deferred-tool inventory observed — tool deferral appears inactive. ` +
-    `Deferral would move ~all of that schema out of the prefix.`
+  const serverPhrase = tn(
+    '%1$d server at ~%2$s tokens/server',
+    '%1$d servers at ~%2$s tokens/server',
+    servers.size, servers.size, formatTokens(perServerSchemaTokens),
+  )
+  const sessionPhrase = tn('%d session', '%d sessions', affectedSessions)
+  const callRatePhrase = callRateText === '1.0'
+    ? t('%s MCP call/session', callRateText)
+    : t('%s MCP calls/session', callRateText)
+  const evidence = t(
+    '~%1$s tokens of MCP tool schema (%2$s) sit in the prompt prefix of %3$s at %4$s, with zero ToolSearch calls and no deferred-tool inventory observed — tool deferral appears inactive. Deferral would move ~all of that schema out of the prefix.',
+    formatTokens(perSessionSchemaTokens), serverPhrase, sessionPhrase, callRatePhrase,
+  )
 
   const { cause, fix, apply } = attributeDeferralOffCause(enableToolSearch, projectCwds, apiCalls, homeDir)
 
   return {
     id: 'mcp-deferral-off',
-    title: 'MCP tool deferral appears inactive',
+    title: t('MCP tool deferral appears inactive'),
     explanation: `${evidence} ${cause}`,
     impact: tokensSaved >= DEFERRAL_OFF_HIGH_IMPACT_TOKENS ? 'high' : 'medium',
     tokensSaved,
@@ -2508,8 +2570,13 @@ export function detectMcpAlwaysLoadHygiene(
     const toolsAvailable = coverage?.toolsAvailable ?? TOOLS_PER_MCP_SERVER
     const loadedSessions = coverage?.loadedSessions ?? totalSessions
     tokensSaved += toolsAvailable * TOKENS_PER_MCP_TOOL * loadedSessions
-    lines.push(`${entry.original}: ${invocations} call${invocations === 1 ? '' : 's'} across ${totalSessions} session${totalSessions === 1 ? '' : 's'}`)
-    fixLines.push(`- Remove "alwaysLoad": true from ${entry.original} in ${entry.alwaysLoadPaths.map(shortHomePath).join(', ')}.`)
+    lines.push(t(
+      '%1$s: %2$s across %3$s',
+      entry.original,
+      tn('%d call', '%d calls', invocations),
+      tn('%d session', '%d sessions', totalSessions),
+    ))
+    fixLines.push(t('- Remove "alwaysLoad": true from %1$s in %2$s.', entry.original, entry.alwaysLoadPaths.map(shortHomePath).join(', ')))
     // Original (config-key) name plus the exact files carrying the pin, so
     // the defer-alwaysload plan edits precisely what was observed.
     applyServers.push({ server: entry.original, paths: entry.alwaysLoadPaths })
@@ -2518,18 +2585,18 @@ export function detectMcpAlwaysLoadHygiene(
 
   return {
     id: 'mcp-alwaysload-hygiene',
-    title: `${lines.length} alwaysLoad MCP server${lines.length === 1 ? '' : 's'} rarely used`,
-    explanation:
-      `These servers are pinned with alwaysLoad, so their tool schemas sit in every session's prefix ` +
-      `despite deferral being available, and session startup blocks on each server's connection ` +
-      `(up to ${ALWAYSLOAD_STARTUP_CAP_SECONDS}s). Usage doesn't justify the pin: ${lines.join('; ')}.`,
+    title: tn('%d alwaysLoad MCP server rarely used', '%d alwaysLoad MCP servers rarely used', lines.length),
+    explanation: t(
+      'These servers are pinned with alwaysLoad, so their tool schemas sit in every session\'s prefix despite deferral being available, and session startup blocks on each server\'s connection (up to %1$ds). Usage doesn\'t justify the pin: %2$s.',
+      ALWAYSLOAD_STARTUP_CAP_SECONDS, lines.join('; '),
+    ),
     impact: tokensSaved >= ALWAYSLOAD_HIGH_IMPACT_TOKENS ? 'high' : 'medium',
     tokensSaved,
     apply: { kind: 'defer-alwaysload', servers: applyServers },
     fix: {
       type: 'paste',
       destination: 'prompt',
-      label: 'Ask Claude to unpin the rarely-used servers (tool search still discovers their tools on demand):',
+      label: t('Ask Claude to unpin the rarely-used servers (tool search still discovers their tools on demand):'),
       text: fixLines.join('\n'),
     },
   }
@@ -2598,12 +2665,13 @@ export function detectMcpDeferThreshold(
 
   return {
     id: 'mcp-defer-threshold',
-    title: 'MCP tool search auto threshold never triggers',
-    explanation:
-      `${ENABLE_TOOL_SEARCH_VAR}=${setting.value} is set in ${setting.scope} (${shortHomePath(setting.path)}), ` +
-      `deferring MCP tool definitions only when they exceed ${percent}% of the ${formatTokens(DEFER_THRESHOLD_CONTEXT_WINDOW_TOKENS)}-token context window ` +
-      `(~${formatTokens(thresholdTokens)} tokens). Your estimated ~${formatTokens(defsPerSession)} tokens of definitions per session fit under that, ` +
-      `so every tool still loads upfront in all ${totalSessions} session${totalSessions === 1 ? '' : 's'}.`,
+    title: t('MCP tool search auto threshold never triggers'),
+    explanation: t(
+      '%1$s=%2$s is set in %3$s (%4$s), deferring MCP tool definitions only when they exceed %5$d%% of the %6$s-token context window (~%7$s tokens). Your estimated ~%8$s tokens of definitions per session fit under that, so every tool still loads upfront in all %9$s.',
+      ENABLE_TOOL_SEARCH_VAR, setting.value, scopeLabel(setting.scope), shortHomePath(setting.path),
+      percent, formatTokens(DEFER_THRESHOLD_CONTEXT_WINDOW_TOKENS), formatTokens(thresholdTokens),
+      formatTokens(defsPerSession), tn('%d session', '%d sessions', totalSessions),
+    ),
     impact: tokensSaved >= DEFER_THRESHOLD_MEDIUM_IMPACT_TOKENS ? 'medium' : 'low',
     tokensSaved,
     apply: {
@@ -2617,10 +2685,16 @@ export function detectMcpDeferThreshold(
     fix: {
       type: 'paste',
       destination: 'prompt',
-      label: 'Ask Claude to tighten the auto threshold:',
+      label: t('Ask Claude to tighten the auto threshold:'),
       text: removeOverride
-        ? `Remove the ${ENABLE_TOOL_SEARCH_VAR}=${setting.value} override from ${setting.path}; the default auto threshold (${DEFER_THRESHOLD_DEFAULT_PERCENT}%) already defers this volume of tool definitions.`
-        : `In ${setting.path}, change ${ENABLE_TOOL_SEARCH_VAR}=${setting.value} to ${ENABLE_TOOL_SEARCH_VAR}=auto:${recommendedPercent} so ~${formatTokens(defsPerSession)} tokens of MCP tool definitions per session are deferred instead of loaded upfront.`,
+        ? t(
+          'Remove the %1$s=%2$s override from %3$s; the default auto threshold (%4$d%%) already defers this volume of tool definitions.',
+          ENABLE_TOOL_SEARCH_VAR, setting.value, setting.path, DEFER_THRESHOLD_DEFAULT_PERCENT,
+        )
+        : t(
+          'In %1$s, change %2$s=%3$s to %2$s=auto:%4$d so ~%5$s tokens of MCP tool definitions per session are deferred instead of loaded upfront.',
+          setting.path, ENABLE_TOOL_SEARCH_VAR, setting.value, recommendedPercent, formatTokens(defsPerSession),
+        ),
     },
   }
 }
@@ -2671,21 +2745,24 @@ export function detectBloatedClaudeMd(projectCwds: Set<string>): WasteFinding | 
   const tokensSaved = totalExtraLines * CLAUDEMD_TOKENS_PER_LINE
 
   const list = sorted.slice(0, TOP_ITEMS_PREVIEW).map(b => {
-    const importNote = b.imports > 0 ? ` with ${b.imports} @-import${b.imports > 1 ? 's' : ''}` : ''
-    return `${b.path} (${b.expandedLines} lines${importNote})`
+    const importNote = b.imports > 0 ? ' ' + tn('with %d @-import', 'with %d @-imports', b.imports) : ''
+    return t('%1$s (%2$d lines%3$s)', b.path, b.expandedLines, importNote)
   }).join(', ')
 
   return {
     id: 'claude-md-too-long',
-    title: `Your CLAUDE.md is too long`,
-    explanation: `${list}. CLAUDE.md plus all @-imported files load into every API call. Trimming below ${CLAUDEMD_HEALTHY_LINES} lines saves ~${formatTokens(tokensSaved)} tokens per call.`,
+    title: t('Your CLAUDE.md is too long'),
+    explanation: t(
+      '%1$s. CLAUDE.md plus all @-imported files load into every API call. Trimming below %2$d lines saves ~%3$s tokens per call.',
+      list, CLAUDEMD_HEALTHY_LINES, formatTokens(tokensSaved),
+    ),
     impact: worst.expandedLines > CLAUDEMD_HIGH_THRESHOLD_LINES ? 'high' : 'medium',
     tokensSaved,
     fix: {
       type: 'paste',
       destination: 'prompt',
-      label: 'Ask Claude in the current session to trim it:',
-      text: `Review CLAUDE.md and all @-imported files. Cut total expanded content to under ${CLAUDEMD_HEALTHY_LINES} lines. Remove anything Claude can figure out from the code itself. Keep only rules, gotchas, and non-obvious conventions.`,
+      label: t('Ask Claude in the current session to trim it:'),
+      text: t('Review CLAUDE.md and all @-imported files. Cut total expanded content to under %d lines. Remove anything Claude can figure out from the code itself. Keep only rules, gotchas, and non-obvious conventions.', CLAUDEMD_HEALTHY_LINES),
     },
   }
 }
@@ -2733,15 +2810,18 @@ export function detectLowReadEditRatio(calls: ToolCall[]): WasteFinding | null {
 
   return {
     id: 'read-edit-ratio',
-    title: 'Claude edits more than it reads',
-    explanation: `Claude made ${reads} reads and ${edits} edits (ratio ${ratio.toFixed(1)}:1). A healthy ratio is ${HEALTHY_READ_EDIT_RATIO}+ reads per edit. Editing without reading leads to retries and wasted tokens.`,
+    title: t('Claude edits more than it reads'),
+    explanation: t(
+      'Claude made %1$d reads and %2$d edits (ratio %3$s:1). A healthy ratio is %4$d+ reads per edit. Editing without reading leads to retries and wasted tokens.',
+      reads, edits, ratio.toFixed(1), HEALTHY_READ_EDIT_RATIO,
+    ),
     impact,
     tokensSaved,
     fix: {
       type: 'paste',
       destination: 'claude-md',
-      label: 'Add to your CLAUDE.md:',
-      text: 'Before editing any file, read it first. Before modifying a function, grep for all callers. Research before you edit.',
+      label: t('Add to your CLAUDE.md:'),
+      text: t('Before editing any file, read it first. Before modifying a function, grep for all callers. Research before you edit.'),
     },
     trend,
   }
@@ -2799,20 +2879,26 @@ export function detectCacheBloat(apiCalls: ApiCallMeta[], projects: ProjectSumma
     const [high, ...rest] = versionAvgs
     const low = rest[rest.length - 1]
     if (high.avg - low.avg > CACHE_VERSION_DIFF_THRESHOLD) {
-      versionNote = ` Version ${high.version} averages ${formatTokens(high.avg)} vs ${low.version} at ${formatTokens(low.avg)}.`
+      versionNote = ' ' + t(
+        'Version %1$s averages %2$s vs %3$s at %4$s.',
+        high.version, formatTokens(high.avg), low.version, formatTokens(low.avg),
+      )
     }
   }
 
   return {
     id: 'warmup-heavy',
-    title: 'Session warmup is unusually large',
-    explanation: `Median cache_creation per call is ${formatTokens(median)} tokens, about ${formatTokens(excess)} above your baseline of ${formatTokens(baseline)}.${versionNote}`,
+    title: t('Session warmup is unusually large'),
+    explanation: t(
+      'Median cache_creation per call is %1$s tokens, about %2$s above your baseline of %3$s.%4$s',
+      formatTokens(median), formatTokens(excess), formatTokens(baseline), versionNote,
+    ),
     impact: excess > CACHE_EXCESS_HIGH_THRESHOLD ? 'high' : 'medium',
     tokensSaved,
     fix: {
       type: 'paste',
       destination: 'shell-config',
-      label: 'Check for recent Claude Code updates or heavy MCP/skill additions. As a workaround (not officially supported), add to ~/.zshrc or ~/.bashrc:',
+      label: t('Check for recent Claude Code updates or heavy MCP/skill additions. As a workaround (not officially supported), add to ~/.zshrc or ~/.bashrc:'),
       text: 'export ANTHROPIC_CUSTOM_HEADERS=\'User-Agent: claude-cli/2.1.98 (external, sdk-cli)\'',
     },
     trend,
@@ -2854,17 +2940,17 @@ export async function detectGhostAgents(calls: ToolCall[]): Promise<WasteFinding
   if (ghosts.length === 0) return null
 
   const tokensSaved = ghosts.length * TOKENS_PER_AGENT_DEF
-  const list = ghosts.slice(0, GHOST_NAMES_PREVIEW).join(', ') + (ghosts.length > GHOST_NAMES_PREVIEW ? `, +${ghosts.length - GHOST_NAMES_PREVIEW} more` : '')
+  const list = ghosts.slice(0, GHOST_NAMES_PREVIEW).join(', ') + (ghosts.length > GHOST_NAMES_PREVIEW ? t(', +%d more', ghosts.length - GHOST_NAMES_PREVIEW) : '')
 
   return {
     id: 'unused-agents',
-    title: `${ghosts.length} custom agent${ghosts.length > 1 ? 's' : ''} you never use`,
-    explanation: `Defined in ~/.claude/agents/ but never invoked in this period: ${list}. Each adds ~${TOKENS_PER_AGENT_DEF} tokens to the Task tool schema on every session.`,
+    title: tn('%d custom agent you never use', '%d custom agents you never use', ghosts.length),
+    explanation: t('Defined in ~/.claude/agents/ but never invoked in this period: %1$s. Each adds ~%2$d tokens to the Task tool schema on every session.', list, TOKENS_PER_AGENT_DEF),
     impact: ghosts.length >= GHOST_AGENTS_HIGH_THRESHOLD ? 'high' : ghosts.length >= GHOST_AGENTS_MEDIUM_THRESHOLD ? 'medium' : 'low',
     tokensSaved,
     fix: {
       type: 'command',
-      label: `Archive unused agent${ghosts.length > 1 ? 's' : ''}:`,
+      label: tn('Archive unused agent:', 'Archive unused agents:', ghosts.length),
       text: ghosts.slice(0, GHOST_CLEANUP_COMMANDS_LIMIT).map(name => `mv ~/.claude/agents/${name}.md ~/.claude/agents/.archived/`).join('\n'),
     },
     apply: { kind: 'archive', names: ghosts },
@@ -2886,17 +2972,17 @@ export async function detectGhostSkills(calls: ToolCall[]): Promise<WasteFinding
   if (ghosts.length === 0) return null
 
   const tokensSaved = ghosts.length * TOKENS_PER_SKILL_DEF
-  const list = ghosts.slice(0, GHOST_NAMES_PREVIEW).join(', ') + (ghosts.length > GHOST_NAMES_PREVIEW ? `, +${ghosts.length - GHOST_NAMES_PREVIEW} more` : '')
+  const list = ghosts.slice(0, GHOST_NAMES_PREVIEW).join(', ') + (ghosts.length > GHOST_NAMES_PREVIEW ? t(', +%d more', ghosts.length - GHOST_NAMES_PREVIEW) : '')
 
   return {
     id: 'unused-skills',
-    title: `${ghosts.length} skill${ghosts.length > 1 ? 's' : ''} you never use`,
-    explanation: `In ~/.claude/skills/ but not invoked this period: ${list}. Each adds ~${TOKENS_PER_SKILL_DEF} tokens of metadata to every session.`,
+    title: tn('%d skill you never use', '%d skills you never use', ghosts.length),
+    explanation: t('In ~/.claude/skills/ but not invoked this period: %1$s. Each adds ~%2$d tokens of metadata to every session.', list, TOKENS_PER_SKILL_DEF),
     impact: ghosts.length >= GHOST_SKILLS_HIGH_THRESHOLD ? 'high' : ghosts.length >= GHOST_SKILLS_MEDIUM_THRESHOLD ? 'medium' : 'low',
     tokensSaved,
     fix: {
       type: 'command',
-      label: `Archive unused skill${ghosts.length > 1 ? 's' : ''}:`,
+      label: tn('Archive unused skill:', 'Archive unused skills:', ghosts.length),
       text: ghosts.slice(0, GHOST_CLEANUP_COMMANDS_LIMIT).map(name => `mv ~/.claude/skills/${name} ~/.claude/skills/.archived/`).join('\n'),
     },
     apply: { kind: 'archive', names: ghosts },
@@ -2920,17 +3006,17 @@ export async function detectGhostCommands(userMessages: string[]): Promise<Waste
   if (ghosts.length === 0) return null
 
   const tokensSaved = ghosts.length * TOKENS_PER_COMMAND_DEF
-  const list = ghosts.slice(0, GHOST_NAMES_PREVIEW).join(', ') + (ghosts.length > GHOST_NAMES_PREVIEW ? `, +${ghosts.length - GHOST_NAMES_PREVIEW} more` : '')
+  const list = ghosts.slice(0, GHOST_NAMES_PREVIEW).join(', ') + (ghosts.length > GHOST_NAMES_PREVIEW ? t(', +%d more', ghosts.length - GHOST_NAMES_PREVIEW) : '')
 
   return {
     id: 'unused-commands',
-    title: `${ghosts.length} slash command${ghosts.length > 1 ? 's' : ''} you never use`,
-    explanation: `In ~/.claude/commands/ but not referenced this period: ${list}. Each adds ~${TOKENS_PER_COMMAND_DEF} tokens of definition per session.`,
+    title: tn('%d slash command you never use', '%d slash commands you never use', ghosts.length),
+    explanation: t('In ~/.claude/commands/ but not referenced this period: %1$s. Each adds ~%2$d tokens of definition per session.', list, TOKENS_PER_COMMAND_DEF),
     impact: ghosts.length >= GHOST_COMMANDS_MEDIUM_THRESHOLD ? 'medium' : 'low',
     tokensSaved,
     fix: {
       type: 'command',
-      label: `Archive unused command${ghosts.length > 1 ? 's' : ''}:`,
+      label: tn('Archive unused command:', 'Archive unused commands:', ghosts.length),
       text: ghosts.slice(0, GHOST_CLEANUP_COMMANDS_LIMIT).map(name => `mv ~/.claude/commands/${name}.md ~/.claude/commands/.archived/`).join('\n'),
     },
     apply: { kind: 'archive', names: ghosts },
@@ -2962,14 +3048,18 @@ export function detectBashBloat(): WasteFinding | null {
 
   return {
     id: 'bash-output-cap',
-    title: 'Shrink bash output limit',
-    explanation: `Your bash output cap is ${(limit / 1000).toFixed(0)}K chars (${configured ? 'configured' : 'default'}). Most output fits in ${(BASH_RECOMMENDED_LIMIT / 1000).toFixed(0)}K. The extra ~${formatTokens(tokensSaved)} tokens per bash call is trailing noise.`,
+    title: t('Shrink bash output limit'),
+    explanation: t(
+      'Your bash output cap is %1$sK chars (%2$s). Most output fits in %3$sK. The extra ~%4$s tokens per bash call is trailing noise.',
+      (limit / 1000).toFixed(0), configured ? t('configured') : t('default'),
+      (BASH_RECOMMENDED_LIMIT / 1000).toFixed(0), formatTokens(tokensSaved),
+    ),
     impact: 'medium',
     tokensSaved,
     fix: {
       type: 'paste',
       destination: 'shell-config',
-      label: 'Add to ~/.zshrc or ~/.bashrc:',
+      label: t('Add to ~/.zshrc or ~/.bashrc:'),
       text: `export BASH_MAX_OUTPUT_LENGTH=${BASH_RECOMMENDED_LIMIT}`,
     },
   }
@@ -3008,23 +3098,26 @@ export function detectRecurringContext(openers: SessionOpener[]): WasteFinding |
     .map(g => {
       const where = g.projects.size === 1
         ? [...g.projects][0].split('-').filter(Boolean).pop() ?? [...g.projects][0]
-        : `${g.projects.size} projects`
-      return `"${g.preview}..." — ${g.sessions} sessions in ${where}, ~${formatTokens(g.tokens)} tokens`
+        : t('%d projects', g.projects.size)
+      return t(
+        '"%1$s..." — %2$d sessions in %3$s, ~%4$s tokens',
+        g.preview, g.sessions, where, formatTokens(g.tokens),
+      )
     })
     .join('; ')
-  const extra = repeated.length > preview.length ? `; +${repeated.length - preview.length} more` : ''
+  const extra = repeated.length > preview.length ? t('; +%d more', repeated.length - preview.length) : ''
 
   return {
     id: 'recurring-context',
-    title: `Same ${(top.chars / 1024).toFixed(1)} KB block pasted at the start of ${top.sessions} sessions`,
-    explanation: `These sessions open with a block you have pasted before, so you pay input tokens for the same context every time: ${list}${extra}. Standing rules belong in CLAUDE.md; reference material belongs in a file Claude reads on demand. Only the repeats are counted, not the first paste.`,
+    title: t('Same %1$s KB block pasted at the start of %2$d sessions', (top.chars / 1024).toFixed(1), top.sessions),
+    explanation: t('These sessions open with a block you have pasted before, so you pay input tokens for the same context every time: %1$s%2$s. Standing rules belong in CLAUDE.md; reference material belongs in a file Claude reads on demand. Only the repeats are counted, not the first paste.', list, extra),
     impact: tokensSaved >= RECURRING_CONTEXT_HIGH_IMPACT_TOKENS ? 'high' : tokensSaved >= RECURRING_CONTEXT_MEDIUM_IMPACT_TOKENS ? 'medium' : 'low',
     tokensSaved,
     fix: {
       type: 'paste',
       destination: 'prompt',
-      label: 'Ask Claude to give this block a permanent home:',
-      text: `I open many sessions by pasting this block:\n"${top.preview}..."\nMove it into CLAUDE.md if it is a standing rule, or into a file you read on demand if it is reference material, then tell me the one-line pointer to start sessions with instead.`,
+      label: t('Ask Claude to give this block a permanent home:'),
+      text: t('I open many sessions by pasting this block:\n"%s..."\nMove it into CLAUDE.md if it is a standing rule, or into a file you read on demand if it is reference material, then tell me the one-line pointer to start sessions with instead.', top.preview),
     },
   }
 }
@@ -3170,17 +3263,17 @@ export function findLowWorthCandidates(projects: ProjectSummary[]): LowWorthCand
       const reasons: string[] = []
 
       if (editTurns === 0 && session.totalCostUSD >= WORTH_IT_NO_EDIT_MIN_COST_USD) {
-        reasons.push('no edit turns')
+        reasons.push(t('no edit turns'))
       }
       if (retries >= WORTH_IT_MIN_RETRIES) {
-        reasons.push(`${retries} retries`)
+        reasons.push(t('%d retries', retries))
       }
       if (
         editTurns > 0
         && oneShotTurns === 0
         && retries >= WORTH_IT_RETRY_WITH_EDIT_MIN_RETRIES
       ) {
-        reasons.push('no one-shot edit turns')
+        reasons.push(t('no one-shot edit turns'))
       }
 
       if (reasons.length === 0) continue
@@ -3211,9 +3304,12 @@ export function detectLowWorthSessions(projects: ProjectSummary[], provider?: st
 
   const preview = candidates.slice(0, WORTH_IT_PREVIEW)
   const list = preview
-    .map(s => `${s.project}/${s.sessionId} on ${s.date}: ${formatCost(s.cost)} (${s.reasons.join(', ')})`)
+    .map(s => t(
+      '%1$s/%2$s on %3$s: %4$s (%5$s)',
+      s.project, s.sessionId, s.date, formatCost(s.cost), s.reasons.join(', '),
+    ))
     .join('; ')
-  const extra = candidates.length > preview.length ? `; +${candidates.length - preview.length} more` : ''
+  const extra = candidates.length > preview.length ? t('; +%d more', candidates.length - preview.length) : ''
   // Per-candidate `tokens` is already the recoverable estimate (bounded
   // no-edit fraction, retry-fraction for edit-with-retries). Sum across candidates.
   const tokensSaved = Math.round(candidates.reduce((sum, s) => sum + s.tokens, 0))
@@ -3233,15 +3329,15 @@ export function detectLowWorthSessions(projects: ProjectSummary[], provider?: st
 
   return {
     id: 'low-worth-sessions',
-    title: `${candidates.length} possibly low-worth expensive session${candidates.length === 1 ? '' : 's'}`,
-    explanation: `Sessions with meaningful spend but weak delivery signals: ${list}${extra}. This is a review candidate, not proof of waste: CodeBurn flags missing edit turns, repeated retries, and sessions without git delivery commands so you can decide whether the work was worth its cost before it becomes a habit.`,
+    title: tn('%d possibly low-worth expensive session', '%d possibly low-worth expensive sessions', candidates.length),
+    explanation: t('Sessions with meaningful spend but weak delivery signals: %1$s%2$s. This is a review candidate, not proof of waste: CodeBurn flags missing edit turns, repeated retries, and sessions without git delivery commands so you can decide whether the work was worth its cost before it becomes a habit.', list, extra),
     impact,
     tokensSaved,
     fix: {
       type: 'paste',
       destination: 'session-opener',
       label: sessionOpenerLabel(optimizeRemediationCopy(provider)),
-      text: LOW_WORTH_OPENER,
+      text: t(LOW_WORTH_OPENER),
     },
   }
 }
@@ -3324,12 +3420,16 @@ export function detectContextBloat(projects: ProjectSummary[], excludedSessionId
   const list = preview
     .map(c => {
       const growth = c.growthRatio !== null && c.growthRatio >= CONTEXT_BLOAT_GROWTH_RATIO
-        ? `, ${c.growthRatio.toFixed(1)}x previous session input`
+        ? t(', %sx previous session input', c.growthRatio.toFixed(1))
         : ''
-      return `${c.project}/${c.sessionId} on ${c.date}: ${formatTokens(c.effectiveInputTokens)} effective input/cache vs ${formatTokens(c.outputTokens)} output (${formatContextRatio(c.ratio)}:1${growth})`
+      return t(
+        '%1$s/%2$s on %3$s: %4$s effective input/cache vs %5$s output (%6$s:1%7$s)',
+        c.project, c.sessionId, c.date, formatTokens(c.effectiveInputTokens),
+        formatTokens(c.outputTokens), formatContextRatio(c.ratio), growth,
+      )
     })
     .join('; ')
-  const extra = candidates.length > preview.length ? `; +${candidates.length - preview.length} more` : ''
+  const extra = candidates.length > preview.length ? t('; +%d more', candidates.length - preview.length) : ''
   // Savings estimate only counts context above a healthier 15:1 input-output ratio.
   // Detection stays stricter at 25:1 so borderline sessions are not shown.
   const tokensSaved = Math.round(candidates.reduce((sum, c) => sum + c.excessInputTokens, 0))
@@ -3349,15 +3449,15 @@ export function detectContextBloat(projects: ProjectSummary[], excludedSessionId
 
   return {
     id: 'context-heavy-sessions',
-    title: `${candidates.length} context-heavy session${candidates.length === 1 ? '' : 's'}`,
-    explanation: `Effective input/cache tokens swamp output in these sessions: ${list}${extra}. This can come from stale context carryover, inherently context-heavy work, or abandoned runs that loaded too much context; starting fresh with only the current goal and relevant files can cut repeated prompt overhead.`,
+    title: tn('%d context-heavy session', '%d context-heavy sessions', candidates.length),
+    explanation: t('Effective input/cache tokens swamp output in these sessions: %1$s%2$s. This can come from stale context carryover, inherently context-heavy work, or abandoned runs that loaded too much context; starting fresh with only the current goal and relevant files can cut repeated prompt overhead.', list, extra),
     impact,
     tokensSaved,
     fix: {
       type: 'paste',
       destination: 'session-opener',
       label: sessionOpenerLabel(optimizeRemediationCopy(provider)),
-      text: CONTEXT_HEAVY_OPENER,
+      text: t(CONTEXT_HEAVY_OPENER),
     },
   }
 }
@@ -3421,16 +3521,22 @@ export function detectSessionOutliers(projects: ProjectSummary[], excludedSessio
   outliers.sort((a, b) => b.cost - a.cost)
   const preview = outliers.slice(0, SESSION_OUTLIER_PREVIEW)
   const list = preview
-    .map(o => `${o.project}/${o.sessionId} on ${o.date}: ${formatCost(o.cost)} (${o.ratio.toFixed(1)}x avg)`)
+    .map(o => t(
+      '%1$s/%2$s on %3$s: %4$s (%5$sx avg)',
+      o.project, o.sessionId, o.date, formatCost(o.cost), o.ratio.toFixed(1),
+    ))
     .join('; ')
-  const extra = outliers.length > preview.length ? `; +${outliers.length - preview.length} more` : ''
+  const extra = outliers.length > preview.length ? t('; +%d more', outliers.length - preview.length) : ''
   const tokensSaved = Math.round(outliers.reduce((sum, o) => sum + o.tokenExcess, 0))
   const totalExcessCost = outliers.reduce((sum, o) => sum + Math.max(0, o.cost - o.avgCost), 0)
 
   return {
     id: 'cost-outliers',
-    title: `${outliers.length} high-cost session outlier${outliers.length === 1 ? '' : 's'}`,
-    explanation: `Sessions costing more than ${SESSION_OUTLIER_MULTIPLIER}x their peer-session average in the same project: ${list}${extra}. These usually come from broad prompts, runaway loops, or context-heavy work that should be split into smaller sessions.`,
+    title: tn('%d high-cost session outlier', '%d high-cost session outliers', outliers.length),
+    explanation: t(
+      'Sessions costing more than %1$dx their peer-session average in the same project: %2$s%3$s. These usually come from broad prompts, runaway loops, or context-heavy work that should be split into smaller sessions.',
+      SESSION_OUTLIER_MULTIPLIER, list, extra,
+    ),
     impact: outliers.length >= 3 || totalExcessCost >= 10 ? 'high' : 'medium',
     tokensSaved,
     ...(usedEstimatedCosts ? { basis: 'estimated' as const } : {}),
@@ -3438,7 +3544,7 @@ export function detectSessionOutliers(projects: ProjectSummary[], excludedSessio
       type: 'paste',
       destination: 'session-opener',
       label: sessionOpenerLabel(optimizeRemediationCopy(provider)),
-      text: 'Before making changes, summarize the smallest viable plan. Keep context narrow, avoid broad searches, and stop after the first working patch so I can review before continuing.',
+      text: t('Before making changes, summarize the smallest viable plan. Keep context narrow, avoid broad searches, and stop after the first working patch so I can review before continuing.'),
     },
   }
 }
@@ -3688,17 +3794,43 @@ const SEP = '\u2500'
 const IMPACT_COLORS: Record<Impact, string> = { high: RED, medium: ORANGE, low: DIM }
 const GRADE_COLORS: Record<HealthGrade, string> = { A: GREEN, B: GREEN, C: GOLD, D: ORANGE, F: RED }
 
+/// Splits `text` into the pieces a line break may fall between: runs of narrow
+/// characters stay whole (Latin words break on spaces), while each wide
+/// character is its own piece, because CJK is written without spaces and would
+/// otherwise never wrap.
+function wrappableTokens(text: string): string[] {
+  const tokens: string[] = []
+  let word = ''
+  for (const char of text) {
+    if (char === ' ' || displayWidth(char) === 2) {
+      if (word) { tokens.push(word); word = '' }
+      tokens.push(char)
+      continue
+    }
+    word += char
+  }
+  if (word) tokens.push(word)
+  return tokens
+}
+
+/// Greedy line filler measured in terminal cells. Byte-identical to the old
+/// space-splitting version for ASCII.
 function wrap(text: string, width: number, indent: string): string {
-  const words = text.split(' ')
   const lines: string[] = []
   let current = ''
-  for (const word of words) {
-    if (current && current.length + word.length + 1 > width) {
-      lines.push(indent + current)
-      current = word
-    } else {
-      current = current ? current + ' ' + word : word
+  let gap = 0
+  for (const token of wrappableTokens(text)) {
+    if (token === ' ') {
+      if (current) gap++
+      continue
     }
+    if (current && displayWidth(current) + gap + displayWidth(token) > width) {
+      lines.push(indent + current)
+      current = token
+    } else {
+      current = current ? current + ' '.repeat(gap) + token : token
+    }
+    gap = 0
   }
   if (current) lines.push(indent + current)
   return lines.join('\n')
@@ -3712,14 +3844,14 @@ function renderActionHeader(action: WasteAction, copy: OptimizeRemediationCopy):
   const headerWidth = PANEL_WIDTH - 4
   const fillTo = (label: string): string => {
     const inner = ` ${label} `
-    const trailing = Math.max(2, headerWidth - inner.length - 4)
-    return `--${inner}${SEP.repeat(trailing)}`.padEnd(headerWidth)
+    const trailing = Math.max(2, headerWidth - displayWidth(inner) - 4)
+    return padCells(`--${inner}${SEP.repeat(trailing)}`, headerWidth)
   }
   switch (action.type) {
     case 'file-content':
-      return fillTo(`Suggested ${action.path} addition`)
+      return fillTo(t('Suggested %s addition', action.path))
     case 'command':
-      return fillTo('Run this command')
+      return fillTo(t('Run this command'))
     case 'paste':
       return fillTo(optimizePasteHeader(action.destination, copy))
   }
@@ -3728,9 +3860,9 @@ function renderActionHeader(action: WasteAction, copy: OptimizeRemediationCopy):
 function renderFinding(n: number, f: WasteFinding, costRate: number, copy: OptimizeRemediationCopy): string[] {
   const lines: string[] = []
   const costSaved = f.tokensSaved * costRate
-  const impactLabel = f.impact.charAt(0).toUpperCase() + f.impact.slice(1)
-  const trendBadge = f.trend === 'improving' ? ' improving \u2193 ' : ''
-  const savings = `~${formatTokens(f.tokensSaved)} tokens (~${formatCost(costSaved)})`
+  const impactLabel = t(f.impact.charAt(0).toUpperCase() + f.impact.slice(1))
+  const trendBadge = f.trend === 'improving' ? ` ${t('improving')} \u2193 ` : ''
+  const savings = t('~%1$s tokens (~%2$s)', formatTokens(f.tokensSaved), formatCost(costSaved))
   const titlePad = PANEL_WIDTH - f.title.length - impactLabel.length - trendBadge.length - 8
   const pad = titlePad > 0 ? ' ' + SEP.repeat(titlePad) + ' ' : '  '
 
@@ -3743,7 +3875,7 @@ function renderFinding(n: number, f: WasteFinding, costRate: number, copy: Optim
   lines.push('')
   lines.push(wrap(f.explanation, PANEL_WIDTH - 4, '  '))
   lines.push('')
-  lines.push(chalk.hex(GOLD)(`  Potential savings: ${savings}`) + chalk.dim(`  ${findingBasis(f)}`))
+  lines.push(chalk.hex(GOLD)(`  ${t('Potential savings: %s', savings)}`) + chalk.dim(`  ${t(findingBasis(f))}`))
   lines.push('')
 
   // Destination header — issue #277. Tells the user where each suggestion
@@ -3767,16 +3899,16 @@ function renderFinding(n: number, f: WasteFinding, costRate: number, copy: Optim
 function renderWorkflowSection(reworkedFiles: ReworkedFile[], coachingNotes: string[]): string[] {
   const lines: string[] = []
   if (reworkedFiles.length > 0) {
-    lines.push(chalk.bold.hex(ORANGE)('  Top reworked files'))
+    lines.push(chalk.bold.hex(ORANGE)(`  ${t('Top reworked files')}`))
     lines.push(chalk.hex(DIM)('  ' + SEP.repeat(PANEL_WIDTH)))
     for (const f of reworkedFiles) {
-      const meta = chalk.dim(`${f.sessions} session${f.sessions === 1 ? '' : 's'}, ${f.edits} edit${f.edits === 1 ? '' : 's'}`)
+      const meta = chalk.dim(`${tn('%d session', '%d sessions', f.sessions)}, ${tn('%d edit', '%d edits', f.edits)}`)
       lines.push(`  ${f.path}  ${meta}`)
     }
     lines.push('')
   }
   if (coachingNotes.length > 0) {
-    lines.push(chalk.bold.hex(ORANGE)('  Coaching notes'))
+    lines.push(chalk.bold.hex(ORANGE)(`  ${t('Coaching notes')}`))
     lines.push(chalk.hex(DIM)('  ' + SEP.repeat(PANEL_WIDTH)))
     for (const note of coachingNotes) {
       lines.push(wrap('- ' + note, PANEL_WIDTH, '  '))
@@ -3797,7 +3929,7 @@ const APPLIED_FIX_COLORS: Record<AppliedFix['verdict'], string> = {
 // verdict back here, on every run.
 function renderAppliedFixes(appliedFixes: AppliedFix[]): string[] {
   if (appliedFixes.length === 0) return []
-  const lines = [chalk.bold.hex(ORANGE)('  Applied fixes'), '']
+  const lines = [chalk.bold.hex(ORANGE)(`  ${t('Applied fixes')}`), '']
   for (const fix of appliedFixes) {
     lines.push(chalk.hex(APPLIED_FIX_COLORS[fix.verdict])(`  ${appliedFixGlyph(fix)} ${formatAppliedFix(fix)}`))
   }
@@ -3825,25 +3957,25 @@ export function renderOptimize(
   const copy = optimizeRemediationCopy(provider)
   const lines: string[] = []
   lines.push('')
-  lines.push(`  ${chalk.bold.hex(ORANGE)('CodeBurn config health')}${chalk.dim('  ' + periodLabel)}`)
+  lines.push(`  ${chalk.bold.hex(ORANGE)(t('CodeBurn config health'))}${chalk.dim('  ' + periodLabelForDisplay(periodLabel))}`)
   lines.push(chalk.hex(DIM)('  ' + SEP.repeat(PANEL_WIDTH)))
 
-  const issueSuffix = findings.length > 0 ? `, ${findings.length} issue${findings.length > 1 ? 's' : ''}` : ''
+  const issueSuffix = findings.length > 0 ? ', ' + tn('%d issue', '%d issues', findings.length) : ''
   const measured = findings.filter(f => findingBasis(f) === 'measured').length
   lines.push('  ' + [
-    `${sessionCount} session${sessionCount === 1 ? '' : 's'}`,
-    `${callCount.toLocaleString()} calls`,
+    tn('%d session', '%d sessions', sessionCount),
+    t('%s calls', callCount.toLocaleString()),
     chalk.hex(GOLD)(formatCost(periodCost)),
-    `Health: ${chalk.bold.hex(GRADE_COLORS[healthGrade])(healthGrade)}${chalk.dim(` (${healthScore}/100${issueSuffix})`)}`,
+    `${t('Health: %s', chalk.bold.hex(GRADE_COLORS[healthGrade])(healthGrade))}${chalk.dim(` (${healthScore}/100${issueSuffix})`)}`,
   ].join(chalk.hex(DIM)('   ')))
   if (findings.length > 0) {
-    lines.push(chalk.dim(`  ${measured} measured · ${findings.length - measured} estimated`))
+    lines.push(chalk.dim(`  ${t('%1$d measured · %2$d estimated', measured, findings.length - measured)}`))
   }
   if (appliedHeader) lines.push('  ' + chalk.hex(GREEN)(appliedHeader))
   lines.push('')
 
   if (findings.length === 0) {
-    lines.push(chalk.hex(GREEN)('  Nothing to fix. Your setup is lean.'))
+    lines.push(chalk.hex(GREEN)(`  ${t('Nothing to fix. Your setup is lean.')}`))
     lines.push('')
     for (const line of optimizeEmptyScanLines(provider)) {
       lines.push(chalk.dim(`  ${line}`))
@@ -3860,11 +3992,11 @@ export function renderOptimize(
   const pct = pctRaw >= 1 ? pctRaw.toFixed(0) : pctRaw.toFixed(1)
 
   const totals = classTotals(findings, costRate)
-  const costText = costRate > 0 ? ` (~${formatCost(totalCost)}, ~${pct}% of spend)` : ''
+  const costText = costRate > 0 ? ' ' + t('(~%1$s, ~%2$s%% of spend)', formatCost(totalCost), pct) : ''
   // The headline is the whole board; name the apply-able slice separately so
   // it never reads as "what CodeBurn can fix for you".
-  const applyable = costRate > 0 && totals.fix.count > 0 ? ` — apply-able: ~${formatCost(totals.fix.savingsUSD)}` : ''
-  lines.push(chalk.hex(GREEN)(`  Potential savings: ~${formatTokens(totalTokens)} tokens${costText}${applyable}`))
+  const applyable = costRate > 0 && totals.fix.count > 0 ? ' — ' + t('apply-able: ~%s', formatCost(totals.fix.savingsUSD)) : ''
+  lines.push(chalk.hex(GREEN)(`  ${t('Potential savings: ~%1$s tokens%2$s%3$s', formatTokens(totalTokens), costText, applyable)}`))
   lines.push('')
 
   // One block per class, in fix -> nudge -> keep order; numbering runs
@@ -3877,7 +4009,7 @@ export function renderOptimize(
     lines.push('')
     for (const f of group) {
       const appliedOn = previouslyApplied?.[f.id]
-      const shown = appliedOn ? { ...f, title: `${f.title} (previously applied ${appliedOn}, re-flagged)` } : f
+      const shown = appliedOn ? { ...f, title: t('%1$s (previously applied %2$s, re-flagged)', f.title, appliedOn) } : f
       lines.push(...renderFinding(++n, shown, costRate, copy))
     }
   }
@@ -3889,13 +4021,13 @@ export function renderOptimize(
   lines.push(...renderWorkflowSection(reworkedFiles, coachingNotes))
 
   if (modelRecommendations && modelRecommendations.length > 0) {
-    lines.push(chalk.bold.hex(ORANGE)('  Model defaults recommendation'))
+    lines.push(chalk.bold.hex(ORANGE)(`  ${t('Model defaults recommendation')}`))
     lines.push(chalk.hex(DIM)('  ' + SEP.repeat(PANEL_WIDTH)))
     for (const rec of modelRecommendations) {
       lines.push(`  ${rec.project}: ${chalk.bold(rec.currentModel)} -> ${chalk.bold.hex(GREEN)(rec.candidateModel)}`)
-      lines.push(chalk.dim(`  Current:  ${(rec.currentOneShotRate*100).toFixed(1)}% one-shot over ${rec.currentEditTurns} edits, ${formatCost(rec.currentCostPerEdit)}/edit`))
-      lines.push(chalk.dim(`  Candidate: ${(rec.candidateOneShotRate*100).toFixed(1)}% one-shot over ${rec.candidateEditTurns} edits, ${formatCost(rec.candidateCostPerEdit)}/edit`))
-      lines.push(`  To apply: ${chalk.hex(CYAN)(`codeburn act apply-model ${rec.project}`)}`)
+      lines.push(chalk.dim(`  ${t('Current:  %1$s%% one-shot over %2$d edits, %3$s/edit', (rec.currentOneShotRate*100).toFixed(1), rec.currentEditTurns, formatCost(rec.currentCostPerEdit))}`))
+      lines.push(chalk.dim(`  ${t('Candidate: %1$s%% one-shot over %2$d edits, %3$s/edit', (rec.candidateOneShotRate*100).toFixed(1), rec.candidateEditTurns, formatCost(rec.candidateCostPerEdit))}`))
+      lines.push(`  ${t('To apply: %s', chalk.hex(CYAN)(`codeburn act apply-model ${rec.project}`))}`)
       lines.push('')
     }
   }
@@ -3927,12 +4059,12 @@ export async function runOptimize(
 ): Promise<void> {
   const format = opts.format ?? 'text'
   if (projects.length === 0 && format === 'text') {
-    console.log(chalk.dim('\n  No usage data found for this period.\n'))
+    console.log(chalk.dim('\n  ' + t('No usage data found for this period.') + '\n'))
     return
   }
 
   if (format === 'text') {
-    process.stderr.write(chalk.dim('  Analyzing your sessions...\n'))
+    process.stderr.write(chalk.dim('  ' + t('Analyzing your sessions...') + '\n'))
   }
 
   const result = await scanAndDetect(projects, dateRange, opts.provider)
