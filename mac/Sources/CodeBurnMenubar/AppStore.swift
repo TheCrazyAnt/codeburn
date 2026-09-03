@@ -899,6 +899,58 @@ final class AppStore {
         cache.removeAll()
     }
 
+    /// Nested periods cannot disagree: whatever "Lifetime" covers includes all
+    /// of "6M", which includes "30D". So a cached longer period whose total is
+    /// below a freshly fetched shorter one was computed before the newer
+    /// sessions landed, and vice versa. Such an entry is provably stale, so drop
+    /// it rather than letting a tab switch render it — that is what made
+    /// Lifetime briefly show less than 6M.
+    private func dropCachesContradictedByPeriodNesting(from key: PayloadCacheKey) {
+        guard key.day == nil, let fetched = cache[key]?.payload else { return }
+        let fetchedCost = fetched.current.cost
+        let fetchedCalls = fetched.current.calls
+
+        for (otherKey, cached) in cache {
+            guard otherKey != key,
+                  otherKey.day == nil,
+                  otherKey.scope == key.scope,
+                  otherKey.provider == key.provider,
+                  otherKey.claudeConfigSourceId == key.claudeConfigSourceId
+            else { continue }
+            let fetchedIsInsideOther = key.period.containingPeriods.contains(otherKey.period)
+            let otherIsInsideFetched = otherKey.period.containingPeriods.contains(key.period)
+            guard fetchedIsInsideOther || otherIsInsideFetched else { continue }
+            if Self.nestedCacheIsStale(
+                cachedCost: cached.payload.current.cost,
+                cachedCalls: cached.payload.current.calls,
+                fetchedCost: fetchedCost,
+                fetchedCalls: fetchedCalls,
+                cachedIsShorter: otherIsInsideFetched
+            ) {
+                cache.removeValue(forKey: otherKey)
+                lastSuccessByKey.removeValue(forKey: otherKey)
+            }
+        }
+    }
+
+    /// Decides whether a cached period's totals contradict a freshly fetched
+    /// period that nests with it. A shorter period may never exceed a longer
+    /// one; a longer one may never fall below a shorter one. Costs get a small
+    /// margin because repricing can nudge them, call counts are exact.
+    nonisolated static func nestedCacheIsStale(
+        cachedCost: Double,
+        cachedCalls: Int,
+        fetchedCost: Double,
+        fetchedCalls: Int,
+        cachedIsShorter: Bool,
+        costEpsilon: Double = 0.005
+    ) -> Bool {
+        if cachedIsShorter {
+            return cachedCost > fetchedCost + costEpsilon || cachedCalls > fetchedCalls
+        }
+        return cachedCost + costEpsilon < fetchedCost || cachedCalls < fetchedCalls
+    }
+
     private func reconcileClaudeConfigSelection(from payload: MenubarPayload, for key: PayloadCacheKey) {
         guard let selected = key.claudeConfigSourceId else { return }
         guard selectedClaudeConfigSourceId == selected else { return }
@@ -1224,6 +1276,7 @@ final class AppStore {
                 return false
             }
             cache[key] = CachedPayload(payload: fresh.payload, fetchedAt: Date(), contradictsAll: fresh.contradictsAll)
+            dropCachesContradictedByPeriodNesting(from: key)
             reconcileClaudeConfigSelection(from: fresh.payload, for: key)
             lastSuccessByKey[key] = Date()
             lastErrorByKey[key] = nil
@@ -1245,6 +1298,7 @@ final class AppStore {
                         return false
                     }
                     cache[key] = CachedPayload(payload: fallback.payload, fetchedAt: Date(), contradictsAll: fallback.contradictsAll)
+                    dropCachesContradictedByPeriodNesting(from: key)
                     reconcileClaudeConfigSelection(from: fallback.payload, for: key)
                     lastSuccessByKey[key] = Date()
                     lastErrorByKey[key] = nil
@@ -1343,6 +1397,7 @@ final class AppStore {
                 return false
             }
             cache[key] = CachedPayload(payload: fresh.payload, fetchedAt: Date(), contradictsAll: fresh.contradictsAll)
+            dropCachesContradictedByPeriodNesting(from: key)
             reconcileClaudeConfigSelection(from: fresh.payload, for: key)
             lastSuccessByKey[key] = Date()
             lastErrorByKey[key] = nil
@@ -2675,6 +2730,21 @@ enum Period: String, CaseIterable, Identifiable {
     case month = "Month"
     case all = "6M"
     case lifetime = "Life"
+
+    /// Periods that strictly contain this one, so their totals can never be
+    /// smaller. Only true containment is listed: 7 days and 30 days are NOT
+    /// inside the calendar month (they reach into the previous one), and a
+    /// custom day selection is not part of this lattice at all.
+    var containingPeriods: [Period] {
+        switch self {
+        case .today: [.sevenDays, .thirtyDays, .month, .all, .lifetime]
+        case .sevenDays: [.thirtyDays, .all, .lifetime]
+        case .thirtyDays: [.all, .lifetime]
+        case .month: [.all, .lifetime]
+        case .all: [.lifetime]
+        case .lifetime: []
+        }
+    }
 
     var id: String { rawValue }
 
