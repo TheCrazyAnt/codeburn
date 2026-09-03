@@ -1,18 +1,22 @@
-export type InsightMode = 'plan' | 'trend' | 'forecast' | 'pulse' | 'stats'
+import { t } from '../lib/i18n'
 
-export const INSIGHT_LABELS: Record<InsightMode, string> = {
-  plan: 'Plan',
-  trend: 'Trend',
-  forecast: 'Forecast',
-  pulse: 'Pulse',
-  stats: 'Stats',
-}
+export type InsightMode = 'plan' | 'trend' | 'forecast' | 'pulse' | 'stats'
 
 /// Same order as the macOS InsightMode enum: Plan first when it is visible.
 export const INSIGHT_ORDER: InsightMode[] = ['plan', 'trend', 'forecast', 'pulse', 'stats']
 
+export function insightLabel(m: InsightMode): string {
+  switch (m) {
+    case 'plan': return t('Plan')
+    case 'trend': return t('Trend')
+    case 'forecast': return t('Forecast')
+    case 'pulse': return t('Pulse')
+    case 'stats': return t('Stats')
+  }
+}
+
 export function isInsightMode(value: string | null): value is InsightMode {
-  return value !== null && value in INSIGHT_LABELS
+  return value !== null && (INSIGHT_ORDER as string[]).includes(value)
 }
 
 type Props = {
@@ -33,7 +37,7 @@ export function InsightPills({ selected, onSelect, modes }: Props) {
           className={`insight-pill ${selected === m ? 'insight-pill-active' : ''}`}
           onClick={() => onSelect(m)}
         >
-          {INSIGHT_LABELS[m]}
+          {insightLabel(m)}
         </button>
       ))}
     </div>

@@ -32,6 +32,17 @@ impl CurrencyConfig {
             Err(_) => Self::default(),
         }
     }
+}
+
+/// The UI language the `codeburn lang` command stored, if any. The tray menu
+/// is built once at startup, so this is read there rather than watched.
+pub fn stored_language() -> Option<String> {
+    let bytes = fs::read(config_path()).ok()?;
+    let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    value.get("lang")?.as_str().map(str::to_string)
+}
+
+impl CurrencyConfig {
 
     pub fn set_currency(&mut self, code: &str, symbol: &str) -> Result<()> {
         fs::create_dir_all(codeburn_config_dir())

@@ -1,25 +1,40 @@
 import { useRef, useState, type WheelEvent } from 'react'
 import type { MenubarPayload } from '../lib/payload'
 import type { CurrencyState } from '../lib/currency'
-import { formatCompactCurrency, formatCurrency, plural } from '../lib/currency'
+import { formatCompactCurrency, formatCurrency } from '../lib/currency'
 import { homePath } from '../lib/platform'
+import { t, tn } from '../lib/i18n'
 
 export type Provider = 'all' | 'claude' | 'codex' | 'cursor' | 'copilot' | 'opencode' | 'pi'
 
-/// Same order as the macOS ProviderFilter.allCases.
-export const ALL_PROVIDERS: Array<{ id: Provider; label: string; source: string }> = [
-  { id: 'all',      label: 'All',      source: 'every detected tool' },
-  { id: 'claude',   label: 'Claude',   source: `Claude Code sessions in ${homePath('.claude', 'projects')}` },
-  { id: 'codex',    label: 'Codex',    source: `Codex CLI sessions in ${homePath('.codex', 'sessions')}` },
-  { id: 'cursor',   label: 'Cursor',   source: 'the Cursor IDE local database' },
-  { id: 'copilot',  label: 'Copilot',  source: 'GitHub Copilot session events' },
-  { id: 'opencode', label: 'OpenCode', source: 'OpenCode session storage' },
-  { id: 'pi',       label: 'Pi',       source: 'Pi session logs' },
+/// Same order as the macOS ProviderFilter.allCases. Only `all` has a translatable
+/// label; the rest are product names.
+export const ALL_PROVIDERS: Array<{ id: Provider; label: string }> = [
+  { id: 'all',      label: 'All' },
+  { id: 'claude',   label: 'Claude' },
+  { id: 'codex',    label: 'Codex' },
+  { id: 'cursor',   label: 'Cursor' },
+  { id: 'copilot',  label: 'Copilot' },
+  { id: 'opencode', label: 'OpenCode' },
+  { id: 'pi',       label: 'Pi' },
 ]
 
-export const PROVIDER_LABELS: Record<Provider, string> = Object.fromEntries(
-  ALL_PROVIDERS.map(p => [p.id, p.label]),
-) as Record<Provider, string>
+export function providerLabel(id: Provider): string {
+  return id === 'all' ? t('All') : (ALL_PROVIDERS.find(p => p.id === id)?.label ?? id)
+}
+
+/// Where CodeBurn reads that tool's data from, as a noun phrase.
+export function providerSource(id: Provider): string {
+  switch (id) {
+    case 'all': return t('every detected tool')
+    case 'claude': return t('Claude Code sessions in %s', homePath('.claude', 'projects'))
+    case 'codex': return t('Codex CLI sessions in %s', homePath('.codex', 'sessions'))
+    case 'cursor': return t('the Cursor IDE local database')
+    case 'copilot': return t('GitHub Copilot session events')
+    case 'opencode': return t('OpenCode session storage')
+    case 'pi': return t('Pi session logs')
+  }
+}
 
 /// Providers the CLI detected on this machine (installed, even with zero spend today).
 export function detectedProviders(payload: MenubarPayload | null): Provider[] {
@@ -55,7 +70,7 @@ export function AgentTabStrip({ selected, onSelect, payload, currency }: Props) 
 
   return (
     <div className="agent-tabs-wrap" onMouseLeave={() => setHovered(null)}>
-      <nav className="agent-tabs" aria-label="Provider" ref={scroller} onWheel={onWheel}>
+      <nav className="agent-tabs" aria-label={t('Provider')} ref={scroller} onWheel={onWheel}>
         {ALL_PROVIDERS.map(p => {
           const detected = p.id === 'all' ? providers.length > 0 : providers.includes(p.id)
           const cost = p.id === 'all' ? total : (costs[p.id] ?? 0)
@@ -71,7 +86,7 @@ export function AgentTabStrip({ selected, onSelect, payload, currency }: Props) 
               onFocus={() => setHovered(p.id)}
               onClick={() => { if (detected) onSelect(p.id) }}
             >
-              <span className="tab-label">{p.label}</span>
+              <span className="tab-label">{providerLabel(p.id)}</span>
               {detected && cost > 0 && (
                 <span className="tab-cost">{formatCompactCurrency(cost, currency)}</span>
               )}
@@ -96,21 +111,31 @@ function previewFor(
   total: number,
   currency: CurrencyState,
 ): { title: string; body: string } {
-  const meta = ALL_PROVIDERS.find(p => p.id === id)!
   if (id === 'all') {
-    if (providers.length === 0) return { title: 'No tools detected yet', body: 'Run one of the supported tools once, then refresh.' }
+    if (providers.length === 0) return { title: t('No tools detected yet'), body: t('Run one of the supported tools once, then refresh.') }
     return {
-      title: `${formatCurrency(total, currency)} today across ${plural(providers.length, 'tool')}`,
-      body: providers.map(p => `${PROVIDER_LABELS[p]} ${formatCompactCurrency(costs[p] ?? 0, currency)}`).join(' · '),
+      title: tn(
+        '%1$s today across %2$d tool',
+        '%1$s today across %2$d tools',
+        providers.length,
+        formatCurrency(total, currency),
+        providers.length,
+      ),
+      body: providers.map(p => `${providerLabel(p)} ${formatCompactCurrency(costs[p] ?? 0, currency)}`).join(' · '),
     }
   }
   if (!providers.includes(id)) {
-    return { title: `${meta.label} not detected on this machine`, body: `CodeBurn watches ${meta.source}.` }
+    return {
+      title: t('%s not detected on this machine', providerLabel(id)),
+      body: t('CodeBurn watches %s.', providerSource(id)),
+    }
   }
   const cost = costs[id] ?? 0
   const share = total > 0 ? Math.round((cost / total) * 100) : 0
   return {
-    title: `${meta.label} · ${formatCurrency(cost, currency)} today`,
-    body: cost > 0 ? `${share}% of today's spend · click to filter every view` : 'No spend yet today · click to filter every view',
+    title: t('%1$s · %2$s today', providerLabel(id), formatCurrency(cost, currency)),
+    body: cost > 0
+      ? t("%d%% of today's spend · click to filter every view", share)
+      : t('No spend yet today · click to filter every view'),
   }
 }

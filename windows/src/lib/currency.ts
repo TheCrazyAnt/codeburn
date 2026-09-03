@@ -64,7 +64,3 @@ export function trayBadgeText(usdAmount: number, currency: CurrencyState): strin
   if (v < 999_500) return `${Math.round(v / BADGE_THOUSAND)}K`
   return `${(v / BADGE_MILLION).toFixed(1)}M`
 }
-
-export function plural(n: number, singular: string, pluralForm = `${singular}s`): string {
-  return `${n} ${n === 1 ? singular : pluralForm}`
-}

@@ -1,6 +1,7 @@
 import type { MenubarPayload } from '../lib/payload'
 import type { CurrencyState } from '../lib/currency'
 import { formatCompactCurrency } from '../lib/currency'
+import { t } from '../lib/i18n'
 
 type Props = {
   payload: MenubarPayload
@@ -16,15 +17,15 @@ export function PulseInsight({ payload, currency }: Props) {
   return (
     <div className="pulse-tiles">
       <div className="pulse-tile">
-        <div className="pulse-label">Cache hit</div>
+        <div className="pulse-label">{t('Cache hit')}</div>
         <div className="pulse-value pulse-value-accent">{cacheText}</div>
       </div>
       <div className="pulse-tile">
-        <div className="pulse-label">1-shot</div>
+        <div className="pulse-label">{t('1-shot')}</div>
         <div className={`pulse-value ${oneShotRate == null ? '' : 'pulse-value-accent'}`}>{oneShotText}</div>
       </div>
       <div className="pulse-tile">
-        <div className="pulse-label">Cost / session</div>
+        <div className="pulse-label">{t('Cost / session')}</div>
         <div className="pulse-value">{costPerSession}</div>
       </div>
     </div>

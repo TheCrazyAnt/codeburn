@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import type { MenubarPayload } from '../lib/payload'
 import type { CurrencyState } from '../lib/currency'
-import { formatCompactCurrency, formatTokens, plural } from '../lib/currency'
+import { formatCompactCurrency, formatTokens } from '../lib/currency'
 import { relativeFuture } from '../lib/dates'
+import { t, tn } from '../lib/i18n'
 import type { PlanUsage, PlanWindow } from '../lib/plan'
 import { projectWindow, earliestReset } from '../lib/plan'
 import { BulbIcon, ChevronRight, KeySlashIcon, PersonDashedIcon, WarningIcon, ArrowUpRight } from './Icons'
@@ -56,19 +57,19 @@ export function PlanInsight({ payload, currency, onOpenTerminal, onConnectClaude
       return (
         <div className="plan-state">
           <PersonDashedIcon size={22} className="plan-state-icon" />
-          <div className="plan-state-title-muted">Loading your plan...</div>
-          <div className="plan-state-note">Reading Claude Code credentials from this machine.</div>
+          <div className="plan-state-title-muted">{t('Loading your plan...')}</div>
+          <div className="plan-state-note">{t('Reading Claude Code credentials from this machine.')}</div>
         </div>
       )
     case 'no_credentials':
       return (
         <div className="plan-state">
           <KeySlashIcon size={20} className="plan-state-icon" />
-          <div className="plan-state-title">No Claude subscription connected</div>
-          <div className="plan-state-note">Click Connect to sign in with Claude in a terminal, then return here.</div>
+          <div className="plan-state-title">{t('No Claude subscription connected')}</div>
+          <div className="plan-state-note">{t('Click Connect to sign in with Claude in a terminal, then return here.')}</div>
           <div className="plan-actions">
-            <button type="button" className="btn btn-prominent" onClick={() => onConnectClaude()}>Connect Claude</button>
-            <button type="button" className="btn" onClick={load}>Retry</button>
+            <button type="button" className="btn btn-prominent" onClick={() => onConnectClaude()}>{t('Connect Claude')}</button>
+            <button type="button" className="btn" onClick={load}>{t('Retry')}</button>
           </div>
         </div>
       )
@@ -76,11 +77,11 @@ export function PlanInsight({ payload, currency, onOpenTerminal, onConnectClaude
       return (
         <div className="plan-state">
           <WarningIcon size={18} filled={false} className="plan-state-icon plan-state-icon-accent" />
-          <div className="plan-state-title">Couldn't load plan data</div>
+          <div className="plan-state-title">{t("Couldn't load plan data")}</div>
           <div className="plan-state-error">{state.message}</div>
           <div className="plan-actions">
-            <button type="button" className="btn btn-prominent" onClick={() => onConnectClaude()}>Reconnect Claude</button>
-            <button type="button" className="btn" onClick={load}>Retry</button>
+            <button type="button" className="btn btn-prominent" onClick={() => onConnectClaude()}>{t('Reconnect Claude')}</button>
+            <button type="button" className="btn" onClick={load}>{t('Retry')}</button>
           </div>
         </div>
       )
@@ -91,7 +92,7 @@ export function PlanInsight({ payload, currency, onOpenTerminal, onConnectClaude
         <div className="plan-insight">
           <div className="plan-header">
             <span className="plan-tier">{usage.tier}</span>
-            {reset && <span className="plan-reset">Resets {relativeFuture(reset, now)}</span>}
+            {reset && <span className="plan-reset">{t('Resets %s', relativeFuture(reset, now))}</span>}
           </div>
           <div className="plan-rows">
             {usage.windows.map(w => <UtilizationRow key={w.key} window={w} now={now} />)}
@@ -100,9 +101,12 @@ export function PlanInsight({ payload, currency, onOpenTerminal, onConnectClaude
             <button type="button" className="savings-badge" onClick={() => onOpenTerminal(['optimize'])}>
               <BulbIcon size={10} className="savings-badge-icon" />
               <span>
-                Save ~{formatCompactCurrency(payload.optimize.savingsUSD, currency)} / ~
-                {formatTokens((payload.optimize.savingsUSD / USD_PER_MILLION_EFFECTIVE_TOKENS) * MILLION)} tokens
-                {' · '}{plural(payload.optimize.findingCount, 'finding')}
+                {t(
+                  'Save ~%1$s / ~%2$s tokens',
+                  formatCompactCurrency(payload.optimize.savingsUSD, currency),
+                  formatTokens((payload.optimize.savingsUSD / USD_PER_MILLION_EFFECTIVE_TOKENS) * MILLION),
+                )}
+                {' · '}{tn('%d finding', '%d findings', payload.optimize.findingCount)}
               </span>
               <ChevronRight size={8} className="savings-badge-chevron" />
             </button>
@@ -121,9 +125,9 @@ function UtilizationRow({ window, now }: { window: PlanWindow; now: Date }) {
   let caption: string | null = null
   if (projection) {
     const pct = Math.round(projection.percent)
-    if (projection.source === 'historical') caption = `Based on last cycle: ${pct}%`
-    else if (projection.willOverflow && projection.hitsLimitAt) caption = `On pace: ${pct}% at reset · hits 100% ${relativeFuture(projection.hitsLimitAt, now)}`
-    else caption = `On pace: ${pct}% at reset`
+    if (projection.source === 'historical') caption = t('Based on last cycle: %d%%', pct)
+    else if (projection.willOverflow && projection.hitsLimitAt) caption = t('On pace: %1$d%% at reset · hits 100%% %2$s', pct, relativeFuture(projection.hitsLimitAt, now))
+    else caption = t('On pace: %d%% at reset', pct)
   }
 
   return (

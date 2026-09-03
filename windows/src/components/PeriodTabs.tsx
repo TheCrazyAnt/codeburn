@@ -1,19 +1,31 @@
+import { t } from '../lib/i18n'
+
 export type Period = 'today' | 'week' | '30days' | 'month' | 'all'
 
-export const PERIOD_LABELS: Record<Period, string> = {
-  today: 'Today', week: '7 Days', '30days': '30 Days', month: 'Month', all: 'All',
+const PERIODS: Period[] = ['today', 'week', '30days', 'month', 'all']
+
+/// Tab title. A function rather than a constant map so the label is translated at
+/// render time -- the language can arrive after this module was evaluated.
+export function periodLabel(p: Period): string {
+  switch (p) {
+    case 'today': return t('Today')
+    case 'week': return t('7 Days')
+    case '30days': return t('30 Days')
+    case 'month': return t('Month')
+    case 'all': return t('All')
+  }
 }
 
-/// Short phrase used in sentences ("Sessions (7 days)", "No Claude data for this month").
-export const PERIOD_PHRASES: Record<Period, string> = {
-  today: 'today',
-  week: 'the last 7 days',
-  '30days': 'the last 30 days',
-  month: 'this month',
-  all: 'all time',
+/// Short phrase used in sentences ("No Claude data for this month").
+export function periodPhrase(p: Period): string {
+  switch (p) {
+    case 'today': return t('today')
+    case 'week': return t('the last 7 days')
+    case '30days': return t('the last 30 days')
+    case 'month': return t('this month')
+    case 'all': return t('all time')
+  }
 }
-
-const PERIODS = Object.keys(PERIOD_LABELS) as Period[]
 
 type Props = {
   selected: Period
@@ -23,7 +35,7 @@ type Props = {
 export function PeriodTabs({ selected, onSelect }: Props) {
   return (
     <div className="period-wrap">
-      <nav className="period-tabs" aria-label="Period">
+      <nav className="period-tabs" aria-label={t('Period')}>
         {PERIODS.map(p => (
           <button
             key={p}
@@ -32,7 +44,7 @@ export function PeriodTabs({ selected, onSelect }: Props) {
             aria-pressed={selected === p}
             onClick={() => onSelect(p)}
           >
-            {PERIOD_LABELS[p]}
+            {periodLabel(p)}
           </button>
         ))}
       </nav>

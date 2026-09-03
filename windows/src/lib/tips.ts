@@ -2,6 +2,7 @@ import type { MenubarPayload } from './payload'
 import type { CurrencyState } from './currency'
 import { formatCompactCurrency, formatSmallCurrency } from './currency'
 import { computeHistoryStats } from './history'
+import { t } from './i18n'
 
 export type TipItem = { text: string; trailing: string | null }
 export type TipGroup = { label: string; icon: string; items: TipItem[] }
@@ -21,10 +22,10 @@ export function computeTipGroups(payload: MenubarPayload, currency: CurrencyStat
   const { cacheHitPercent, oneShotRate } = payload.current
 
   const wins: TipItem[] = []
-  if (cacheHitPercent >= CACHE_HIT_GOOD) wins.push({ text: `Cache hit at ${Math.round(cacheHitPercent)}% - most prompts reuse cache`, trailing: null })
-  if (oneShotRate != null && oneShotRate >= ONESHOT_GOOD) wins.push({ text: `${Math.round(oneShotRate * 100)}% one-shot - edits landing first try`, trailing: null })
-  if (stats.weekDelta != null && stats.weekDelta < SPEND_DOWN_THRESHOLD) wins.push({ text: `Spend down ${Math.round(Math.abs(stats.weekDelta))}% vs last 7 days`, trailing: null })
-  if (stats.currentStreak >= STREAK_MILESTONE) wins.push({ text: `${stats.currentStreak}-day usage streak`, trailing: null })
+  if (cacheHitPercent >= CACHE_HIT_GOOD) wins.push({ text: t('Cache hit at %d%% - most prompts reuse cache', cacheHitPercent), trailing: null })
+  if (oneShotRate != null && oneShotRate >= ONESHOT_GOOD) wins.push({ text: t('%d%% one-shot - edits landing first try', oneShotRate * 100), trailing: null })
+  if (stats.weekDelta != null && stats.weekDelta < SPEND_DOWN_THRESHOLD) wins.push({ text: t('Spend down %d%% vs last 7 days', Math.abs(stats.weekDelta)), trailing: null })
+  if (stats.currentStreak >= STREAK_MILESTONE) wins.push({ text: t('%d-day usage streak', stats.currentStreak), trailing: null })
 
   const improvements: TipItem[] = payload.optimize.topFindings.slice(0, TOP_FINDINGS_COUNT).map(f => ({
     text: f.title,
@@ -32,17 +33,17 @@ export function computeTipGroups(payload: MenubarPayload, currency: CurrencyStat
   }))
 
   const risks: TipItem[] = []
-  if (stats.weekDelta != null && stats.weekDelta > SPEND_UP_THRESHOLD) risks.push({ text: `Spend up ${Math.round(stats.weekDelta)}% vs prior 7 days`, trailing: null })
-  if (cacheHitPercent > 0 && cacheHitPercent < CACHE_HIT_LOW) risks.push({ text: `Cache hit only ${Math.round(cacheHitPercent)}% - paying for cold prompts`, trailing: null })
-  if (oneShotRate != null && oneShotRate < ONESHOT_LOW) risks.push({ text: `${Math.round(oneShotRate * 100)}% one-shot - lots of iteration`, trailing: null })
+  if (stats.weekDelta != null && stats.weekDelta > SPEND_UP_THRESHOLD) risks.push({ text: t('Spend up %d%% vs prior 7 days', stats.weekDelta), trailing: null })
+  if (cacheHitPercent > 0 && cacheHitPercent < CACHE_HIT_LOW) risks.push({ text: t('Cache hit only %d%% - paying for cold prompts', cacheHitPercent), trailing: null })
+  if (oneShotRate != null && oneShotRate < ONESHOT_LOW) risks.push({ text: t('%d%% one-shot - lots of iteration', oneShotRate * 100), trailing: null })
   if (stats.previousMonthTotal != null && stats.previousMonthTotal > 0 && stats.monthProjection > stats.previousMonthTotal * MONTH_GROWTH_WARNING) {
     const pct = Math.round(((stats.monthProjection - stats.previousMonthTotal) / stats.previousMonthTotal) * 100)
-    risks.push({ text: `On pace for ${formatCompactCurrency(stats.monthProjection, currency)} this month (+${pct}% vs last)`, trailing: null })
+    risks.push({ text: t('On pace for %1$s this month (+%2$d%% vs last)', formatCompactCurrency(stats.monthProjection, currency), pct), trailing: null })
   }
 
   return [
-    { label: "What's working", icon: 'check', items: wins },
-    { label: 'What to improve', icon: 'up', items: improvements },
-    { label: 'Risks', icon: 'warn', items: risks },
+    { label: t("What's working"), icon: 'check', items: wins },
+    { label: t('What to improve'), icon: 'up', items: improvements },
+    { label: t('Risks'), icon: 'warn', items: risks },
   ]
 }

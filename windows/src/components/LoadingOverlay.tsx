@@ -1,3 +1,4 @@
+import { t } from '../lib/i18n'
 import { FLAME_PATH } from './Icons'
 
 /// The macOS BurnLoadingOverlay: a blurred sheet over the scroll area with a flame that
@@ -10,7 +11,7 @@ export function LoadingOverlay({ periodLabel }: Props) {
     <div className="loading-overlay" role="status" aria-live="polite">
       <div className="loading-content">
         <BurnFlame />
-        <div className="loading-text">Loading {periodLabel}…</div>
+        <div className="loading-text">{t('Loading %s…', periodLabel)}</div>
       </div>
     </div>
   )

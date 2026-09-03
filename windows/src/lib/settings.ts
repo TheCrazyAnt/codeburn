@@ -6,6 +6,9 @@ const KEYS = {
   insight: 'codeburn.insight',
   starBannerDismissed: 'codeburn.starBannerDismissed',
   trayBadge: 'codeburn.trayBadge',
+  /// 'system' | 'en' | 'zh-CN'. 'system' (or absent) follows `payload.lang`,
+  /// i.e. whatever `codeburn lang` resolved, and then the webview locale.
+  language: 'codeburn.language',
 } as const
 
 type Key = keyof typeof KEYS

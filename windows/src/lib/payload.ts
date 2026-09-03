@@ -3,6 +3,9 @@
 /// (macOS app). Any field change there must land here too or the frontend silently drops it.
 export type MenubarPayload = {
   generated: string
+  /// UI language the CLI resolved (`codeburn lang`). Absent on older CLIs, in
+  /// which case the popover falls back to the webview locale.
+  lang?: string
   current: {
     label: string
     cost: number

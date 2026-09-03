@@ -4,6 +4,7 @@ import { openUrl } from '@tauri-apps/plugin-opener'
 import type { CurrencyState } from '../lib/currency'
 import { CURRENCY_CODES } from '../lib/currency'
 import { homePath, TRAY_BADGE_SUPPORTED } from '../lib/platform'
+import { t, type LanguageChoice } from '../lib/i18n'
 import type { CliStatus } from './SetupState'
 import { DropMenu } from './DropMenu'
 import { ChevronDown, ChevronRight } from './Icons'
@@ -25,6 +26,8 @@ type Props = {
   onThemeChoice: (t: ThemeChoice) => void
   trayBadge: boolean
   onTrayBadge: (on: boolean) => void
+  language: LanguageChoice
+  onLanguage: (l: LanguageChoice) => void
   cliStatus: CliStatus | null
   onCheckCli: () => void
   cliChecking: boolean
@@ -33,7 +36,7 @@ type Props = {
 
 export function SettingsPanel({
   onBack, version, currency, onCurrency, themeChoice, onThemeChoice, trayBadge, onTrayBadge,
-  cliStatus, onCheckCli, cliChecking, onQuit,
+  language, onLanguage, cliStatus, onCheckCli, cliChecking, onQuit,
 }: Props) {
   const [loginItem, setLoginItem] = useState<boolean | null>(null)
   const [loginError, setLoginError] = useState<string | null>(null)
@@ -58,43 +61,61 @@ export function SettingsPanel({
   return (
     <section className="settings">
       <div className="settings-head">
-        <button type="button" className="btn btn-icon" onClick={onBack} aria-label="Back">
+        <button type="button" className="btn btn-icon" onClick={onBack} aria-label={t('Back')}>
           <ChevronRight size={11} style={{ transform: 'rotate(180deg)' }} />
         </button>
-        <span className="settings-title">Settings</span>
+        <span className="settings-title">{t('Settings')}</span>
       </div>
 
       <div className="settings-group">
-        <div className="settings-group-label">General</div>
-        <Row label="Launch at login" hint="Start CodeBurn in the tray when you sign in.">
+        <div className="settings-group-label">{t('General')}</div>
+        <Row label={t('Launch at login')} hint={t('Start CodeBurn in the tray when you sign in.')}>
           <Toggle on={loginItem === true} disabled={loginItem === null} onToggle={toggleLogin} />
         </Row>
         {loginError && <div className="settings-error">{loginError}</div>}
         {TRAY_BADGE_SUPPORTED && (
-          <Row label="Show today's cost in the tray" hint="A second tray icon carrying the number, next to the logo.">
+          <Row label={t("Show today's cost in the tray")} hint={t('A second tray icon carrying the number, next to the logo.')}>
             <Toggle on={trayBadge} onToggle={() => onTrayBadge(!trayBadge)} />
           </Row>
         )}
       </div>
 
       <div className="settings-group">
-        <div className="settings-group-label">Appearance</div>
-        <Row label="Theme">
+        <div className="settings-group-label">{t('Appearance')}</div>
+        <Row label={t('Theme')}>
           <div className="segmented">
-            {(['system', 'light', 'dark'] as ThemeChoice[]).map(t => (
+            {(['system', 'light', 'dark'] as ThemeChoice[]).map(choice => (
               <button
-                key={t}
+                key={choice}
                 type="button"
-                className={`segment ${themeChoice === t ? 'segment-active' : ''}`}
-                aria-pressed={themeChoice === t}
-                onClick={() => onThemeChoice(t)}
+                className={`segment ${themeChoice === choice ? 'segment-active' : ''}`}
+                aria-pressed={themeChoice === choice}
+                onClick={() => onThemeChoice(choice)}
               >
-                {t === 'system' ? 'System' : t === 'light' ? 'Light' : 'Dark'}
+                {choice === 'system' ? t('System') : choice === 'light' ? t('Light') : t('Dark')}
               </button>
             ))}
           </div>
         </Row>
-        <Row label="Currency" hint={`Shared with the CLI via ${homePath('.config', 'codeburn', 'config.json')}.`}>
+        <Row
+          label={t('Language')}
+          hint={t('Overrides the language `codeburn lang` resolved for the CLI. Applies right away.')}
+        >
+          <div className="segmented">
+            {(['system', 'en', 'zh-CN'] as LanguageChoice[]).map(choice => (
+              <button
+                key={choice}
+                type="button"
+                className={`segment ${language === choice ? 'segment-active' : ''}`}
+                aria-pressed={language === choice}
+                onClick={() => onLanguage(choice)}
+              >
+                {choice === 'system' ? t('System') : choice === 'en' ? 'English' : '简体中文'}
+              </button>
+            ))}
+          </div>
+        </Row>
+        <Row label={t('Currency')} hint={t('Shared with the CLI via %s.', homePath('.config', 'codeburn', 'config.json'))}>
           <DropMenu
             label={<><span>{currency.code}</span><ChevronDown size={10} /></>}
             items={CURRENCY_CODES.map(c => ({ id: c, label: c, checked: c === currency.code }))}
@@ -106,24 +127,26 @@ export function SettingsPanel({
       </div>
 
       <div className="settings-group">
-        <div className="settings-group-label">Data source</div>
+        <div className="settings-group-label">{t('Data source')}</div>
         <Row
           label="CodeBurn CLI"
-          hint={cliStatus?.found ? `Version ${cliStatus.version ?? '?'} · ${cliStatus.program}` : 'Not found on this machine.'}
+          hint={cliStatus?.found
+            ? t('Version %1$s · %2$s', cliStatus.version ?? '?', cliStatus.program)
+            : t('Not found on this machine.')}
         >
           <button type="button" className="btn" onClick={onCheckCli} disabled={cliChecking}>
-            {cliChecking ? 'Checking…' : 'Check again'}
+            {cliChecking ? t('Checking…') : t('Check again')}
           </button>
         </Row>
       </div>
 
       <div className="settings-group">
-        <div className="settings-group-label">About</div>
-        <Row label={`CodeBurn Desktop ${version ? `v${version}` : ''}`} hint="Tracks AI coding spend from local session logs. Nothing leaves this machine except the Claude usage check.">
+        <div className="settings-group-label">{t('About')}</div>
+        <Row label={`CodeBurn Desktop ${version ? `v${version}` : ''}`} hint={t('Tracks AI coding spend from local session logs. Nothing leaves this machine except the Claude usage check.')}>
           <button type="button" className="btn" onClick={() => openUrl(GITHUB_URL)}>GitHub</button>
         </Row>
-        <Row label="Quit CodeBurn" hint="Removes the tray icon until you launch it again.">
-          <button type="button" className="btn" onClick={onQuit}>Quit</button>
+        <Row label={t('Quit CodeBurn')} hint={t('Removes the tray icon until you launch it again.')}>
+          <button type="button" className="btn" onClick={onQuit}>{t('Quit')}</button>
         </Row>
       </div>
     </section>

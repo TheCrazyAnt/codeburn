@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { t } from '../lib/i18n'
 import { XIcon } from './Icons'
 
 const AUTO_DISMISS_MS = 8_000
@@ -21,7 +22,7 @@ export function ErrorToast({ message, onDismiss }: Props) {
   return (
     <div className="error-toast" role="alert">
       <span className="error-toast-text">{message}</span>
-      <button type="button" className="error-toast-close" onClick={onDismiss} aria-label="Dismiss">
+      <button type="button" className="error-toast-close" onClick={onDismiss} aria-label={t('Dismiss')}>
         <XIcon size={9} />
       </button>
     </div>

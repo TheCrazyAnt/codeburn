@@ -9,6 +9,9 @@ import { PayloadCache } from './lib/cache'
 import { relativePast } from './lib/dates'
 import { applyTheme, currentTheme, readSetting, writeSetting } from './lib/settings'
 import { TRAY_BADGE_SUPPORTED } from './lib/platform'
+import {
+  isLanguageChoice, resolveLanguage, setLanguage, t, useLanguage, type LanguageChoice,
+} from './lib/i18n'
 import { AgentTabStrip, detectedProviders } from './components/AgentTabStrip'
 import type { Provider } from './components/AgentTabStrip'
 import { ModelsSection } from './components/ModelsSection'
@@ -26,7 +29,7 @@ import { NoDataState } from './components/NoDataState'
 import { SetupState, type CliStatus } from './components/SetupState'
 import { StarBanner } from './components/StarBanner'
 import { HeroSection } from './components/HeroSection'
-import { PeriodTabs, PERIOD_LABELS } from './components/PeriodTabs'
+import { PeriodTabs, periodLabel } from './components/PeriodTabs'
 import type { Period } from './components/PeriodTabs'
 import { FooterBar } from './components/FooterBar'
 import { ErrorToast } from './components/ErrorToast'
@@ -74,6 +77,14 @@ export function App() {
     const saved = readSetting('theme')
     return saved === 'dark' || saved === 'light' ? saved : 'system'
   })
+  const [languageChoice, setLanguageChoice] = useState<LanguageChoice>(() => {
+    const saved = readSetting('language')
+    return isLanguageChoice(saved) ? saved : 'system'
+  })
+
+  // Repaints the popover when the language changes under it -- the CLI payload
+  // carries `lang`, so the right language usually only arrives after first paint.
+  const language = useLanguage()
 
   const selection = useRef({ period, provider })
   selection.current = { period, provider }
@@ -208,18 +219,26 @@ export function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  // `system` follows the CLI (`codeburn lang`), then the webview locale; an explicit
+  // choice in Settings wins over both.
+  const payloadLang = todayPayload?.lang ?? payload?.lang ?? null
+  useEffect(() => {
+    setLanguage(resolveLanguage({ chosen: languageChoice, payload: payloadLang }))
+  }, [languageChoice, payloadLang])
+
   const todayCost = todayPayload?.current?.cost ?? null
 
   useEffect(() => {
     if (todayCost === null) return
-    const text = `CodeBurn · ${formatCurrency(todayCost, currency)} today`
+    const text = t('CodeBurn · %s today', formatCurrency(todayCost, currency))
     invoke('set_tray_tooltip', { text }).catch(() => {})
-  }, [todayCost, currency])
+    // `language` is a dependency because the tooltip text is translated.
+  }, [todayCost, currency, language])
 
   useEffect(() => {
     if (!TRAY_BADGE_SUPPORTED) return
     const text = trayBadge && todayCost !== null ? trayBadgeText(todayCost, currency) : null
-    invoke('set_tray_badge', { text }).catch(err => setError(`Tray badge: ${String(err)}`))
+    invoke('set_tray_badge', { text }).catch(err => setError(t('Tray badge: %s', String(err))))
   }, [todayCost, currency, trayBadge])
 
 
@@ -231,6 +250,11 @@ export function App() {
 
   const toggleTheme = () => {
     chooseTheme(currentTheme() === 'dark' ? 'light' : 'dark')
+  }
+
+  const chooseLanguage = (choice: LanguageChoice) => {
+    setLanguageChoice(choice)
+    writeSetting('language', choice === 'system' ? null : choice)
   }
 
   const setTrayBadgePref = (on: boolean) => {
@@ -275,7 +299,7 @@ export function App() {
     && (payload.current?.calls ?? 0) === 0 && (payload.current?.sessions ?? 0) === 0
     && (payload.history?.daily?.length ?? 0) === 0
 
-  const footnote = [version ? `CodeBurn v${version}` : 'CodeBurn', lastUpdated ? `updated ${relativePast(lastUpdated)}` : null]
+  const footnote = [version ? `CodeBurn v${version}` : 'CodeBurn', lastUpdated ? t('updated %s', relativePast(lastUpdated)) : null]
     .filter(Boolean)
     .join(' · ')
 
@@ -286,7 +310,7 @@ export function App() {
           <span className="brand-primary">Code</span>
           <span className="brand-accent">Burn</span>
         </div>
-        <div className="subhead">AI Coding Cost Tracker</div>
+        <div className="subhead">{t('AI Coding Cost Tracker')}</div>
       </header>
 
       {!cliBlocked && !showSettings && (
@@ -304,6 +328,8 @@ export function App() {
             onThemeChoice={chooseTheme}
             trayBadge={trayBadge}
             onTrayBadge={setTrayBadgePref}
+            language={languageChoice}
+            onLanguage={chooseLanguage}
             cliStatus={cliStatus}
             onCheckCli={checkCli}
             cliChecking={cliChecking}
@@ -313,7 +339,7 @@ export function App() {
           <SetupState status={cliStatus} checking={cliChecking} onCheckAgain={checkCli} />
         ) : (
           <>
-            <HeroSection payload={payload} currency={currency} periodLabel={PERIOD_LABELS[period]} isToday={period === 'today'} />
+            <HeroSection payload={payload} currency={currency} periodLabel={periodLabel(period)} isToday={period === 'today'} />
             <PeriodTabs selected={period} onSelect={setPeriod} />
 
             {isFilteredEmpty ? (
@@ -347,7 +373,7 @@ export function App() {
                 )}
               </>
             )}
-            {overlay && <LoadingOverlay periodLabel={PERIOD_LABELS[period]} />}
+            {overlay && <LoadingOverlay periodLabel={periodLabel(period)} />}
           </>
         )}
       </div>
@@ -361,7 +387,7 @@ export function App() {
         onOpenReport={() => openTerminal(['report'])}
         onToggleTheme={toggleTheme}
         onQuit={() => invoke('quit_app').catch(() => {})}
-        themeLabel={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+        themeLabel={theme === 'dark' ? t('Switch to light theme') : t('Switch to dark theme')}
         trayBadge={trayBadge}
         onToggleTrayBadge={() => setTrayBadgePref(!trayBadge)}
         onOpenSettings={() => setShowSettings(s => !s)}

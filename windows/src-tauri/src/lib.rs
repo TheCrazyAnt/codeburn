@@ -2,6 +2,7 @@ mod autostart;
 mod cli;
 mod config;
 mod fx;
+mod i18n;
 mod plan;
 /// The spend-in-the-tray badge is a second tray icon, which only the Tauri tray backend
 /// provides; Linux runs its own SNI tray (`tray_linux`) and has no equivalent, so the
@@ -55,6 +56,10 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            // Before the tray menu is built, so its labels come out in the
+            // language the CLI is configured for.
+            i18n::set_language(i18n::resolve_language(config::stored_language().as_deref()));
+
             app.manage(AppState {
                 cli: Mutex::new(CodeburnCli::resolve()),
                 config: Mutex::new(CurrencyConfig::load_or_default()),
@@ -120,11 +125,11 @@ fn build_tray_tauri(app: &AppHandle) -> tauri::Result<()> {
         return Ok(());
     };
 
-    let open = MenuItem::with_id(app, "open", "Open CodeBurn", true, None::<&str>)?;
-    let refresh = MenuItem::with_id(app, "refresh", "Refresh", true, None::<&str>)?;
-    let theme = MenuItem::with_id(app, "toggle_theme", "Toggle Dark/Light", true, None::<&str>)?;
-    let report = MenuItem::with_id(app, "report", "Open Full Report", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "Quit CodeBurn", true, None::<&str>)?;
+    let open = MenuItem::with_id(app, "open", i18n::t("Open CodeBurn"), true, None::<&str>)?;
+    let refresh = MenuItem::with_id(app, "refresh", i18n::t("Refresh"), true, None::<&str>)?;
+    let theme = MenuItem::with_id(app, "toggle_theme", i18n::t("Toggle Dark/Light"), true, None::<&str>)?;
+    let report = MenuItem::with_id(app, "report", i18n::t("Open Full Report"), true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", i18n::t("Quit CodeBurn"), true, None::<&str>)?;
     let menu = Menu::with_items(
         app,
         &[

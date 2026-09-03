@@ -2,6 +2,11 @@
 /// by local date, so "today" here must be the same local day or the trend chart and the
 /// hero disagree around midnight.
 
+import { t } from './i18n'
+
+/// English abbreviations double as the translation keys, so the arrays stay
+/// module-level and only the lookup goes through `t()` -- the language can still
+/// arrive after this module was evaluated.
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const MONTH_NAMES = [
   'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
@@ -37,14 +42,17 @@ export function startOfDay(d: Date): Date {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate())
 }
 
+/// "Mon Jan 5". The composition itself is a key so a locale can reorder weekday,
+/// month and day instead of having them concatenated in English order.
 export function prettyDate(ymd: string): string {
   const dt = parseDateKey(ymd)
-  return `${DAY_NAMES[dt.getDay()]} ${MONTH_NAMES[dt.getMonth()]} ${dt.getDate()}`
+  return t('%1$s %2$s %3$d', t(DAY_NAMES[dt.getDay()]), t(MONTH_NAMES[dt.getMonth()]), dt.getDate())
 }
 
+/// "Jan 5".
 export function monthDay(ymd: string): string {
   const dt = parseDateKey(ymd)
-  return `${MONTH_NAMES[dt.getMonth()]} ${dt.getDate()}`
+  return t('%1$s %2$d', t(MONTH_NAMES[dt.getMonth()]), dt.getDate())
 }
 
 export function shortDate(ymd: string): string {
@@ -73,17 +81,17 @@ export function previousMonthRange(d: Date): { first: string; last: string } {
 /// "in 42m", "in 3h", "in 2d", or "now".
 export function relativeFuture(target: Date, now = new Date()): string {
   const secs = (target.getTime() - now.getTime()) / 1000
-  if (secs <= 0) return 'now'
-  if (secs < 3600) return `in ${Math.ceil(secs / 60)}m`
-  if (secs < 86_400) return `in ${Math.ceil(secs / 3600)}h`
-  return `in ${Math.ceil(secs / 86_400)}d`
+  if (secs <= 0) return t('now')
+  if (secs < 3600) return t('in %dm', Math.ceil(secs / 60))
+  if (secs < 86_400) return t('in %dh', Math.ceil(secs / 3600))
+  return t('in %dd', Math.ceil(secs / 86_400))
 }
 
 /// "just now", "2 min ago", "1 h ago".
 export function relativePast(target: Date, now = new Date()): string {
   const secs = Math.max(0, (now.getTime() - target.getTime()) / 1000)
-  if (secs < 45) return 'just now'
-  if (secs < 3600) return `${Math.round(secs / 60)} min ago`
-  if (secs < 86_400) return `${Math.round(secs / 3600)} h ago`
-  return `${Math.round(secs / 86_400)} d ago`
+  if (secs < 45) return t('just now')
+  if (secs < 3600) return t('%d min ago', Math.round(secs / 60))
+  if (secs < 86_400) return t('%d h ago', Math.round(secs / 3600))
+  return t('%d d ago', Math.round(secs / 86_400))
 }

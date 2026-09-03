@@ -91,7 +91,7 @@ impl PlanClient {
                     .filter(|t| *t != creds.access_token);
                 let Some(token) = rotated else {
                     return Ok(PlanUsage::Failed {
-                        message: "Claude is refreshing its session. This clears itself once Claude Code renews the token; run `claude login` if it persists.".into(),
+                        message: crate::i18n::t("Claude is refreshing its session. This clears itself once Claude Code renews the token; run `claude login` if it persists."),
                     });
                 };
                 match fetch_usage(&token).await {
@@ -127,7 +127,7 @@ impl PlanClient {
             };
             windows.push(PlanWindow {
                 key: key.to_string(),
-                label: label.to_string(),
+                label: crate::i18n::t(label),
                 percent: percent.clamp(0.0, 100.0),
                 resets_at,
                 previous_final,

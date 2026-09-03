@@ -3,6 +3,7 @@ import type { DailyEntry, DailyModel } from '../lib/payload'
 import type { CurrencyState } from '../lib/currency'
 import { formatCompactCurrency, formatCurrency, formatTokens } from '../lib/currency'
 import { todayKey, formatDateKey, addDays, startOfDay, prettyDate, shortDate } from '../lib/dates'
+import { t } from '../lib/i18n'
 import { ArrowUpRight, ArrowDownRight } from './Icons'
 
 /// 19 columns of 13px bars with 4px gaps = 319px, the widest chart that fits the 332px
@@ -69,21 +70,21 @@ export function TrendInsight({ days, currency }: Props) {
   const yesterday = bars.find(b => b.date === yd)
   const delta = computeDelta(bars, days)
 
-  const fmtVal = (v: number) => useTokens ? `${formatTokens(v)} tok` : formatCompactCurrency(v, currency)
-  const heroText = useTokens ? `${formatTokens(totalTokens)} tokens` : formatCurrency(totalCost, currency)
+  const fmtVal = (v: number) => useTokens ? t('%s tok', formatTokens(v)) : formatCompactCurrency(v, currency)
+  const heroText = useTokens ? t('%s tokens', formatTokens(totalTokens)) : formatCurrency(totalCost, currency)
   const hovered = hoveredIdx !== null ? bars[hoveredIdx] : null
 
   return (
     <div className="trend-insight">
       <div className="insight-header">
         <div>
-          <div className="insight-sublabel">Last {TREND_DAYS} days</div>
+          <div className="insight-sublabel">{t('Last %d days', TREND_DAYS)}</div>
           <div className="insight-hero">{heroText}</div>
         </div>
         {delta !== null && (
           <div className="delta-badge">
             {delta >= 0 ? <ArrowUpRight size={9} /> : <ArrowDownRight size={9} />}
-            <span>{delta >= 0 ? '+' : ''}{Math.round(delta)}% vs prior {TREND_DAYS}d</span>
+            <span>{t('%s%% vs prior %dd', `${delta >= 0 ? '+' : ''}${Math.round(delta)}`, TREND_DAYS)}</span>
           </div>
         )}
       </div>
@@ -124,7 +125,7 @@ export function TrendInsight({ days, currency }: Props) {
               <div key={m.name} className="bar-tooltip-model">
                 <span className="bar-tooltip-dot" />
                 <span className="bar-tooltip-name">{m.name}</span>
-                <span className="bar-tooltip-tokens">{formatTokens(m.inputTokens + m.outputTokens)} tok</span>
+                <span className="bar-tooltip-tokens">{t('%s tok', formatTokens(m.inputTokens + m.outputTokens))}</span>
                 <span className="bar-tooltip-split">({formatTokens(m.inputTokens)}/{formatTokens(m.outputTokens)})</span>
               </div>
             ))}
@@ -134,17 +135,17 @@ export function TrendInsight({ days, currency }: Props) {
 
       <div className="mini-stats">
         <div className="mini-stat">
-          <div className="mini-stat-label">Avg/day</div>
+          <div className="mini-stat-label">{t('Avg/day')}</div>
           <div className="mini-stat-value">{fmtVal(avgVal)}</div>
         </div>
         <div className="mini-stat">
-          <div className="mini-stat-label">Peak</div>
+          <div className="mini-stat-label">{t('Peak')}</div>
           <div className="mini-stat-value">
-            {peak ? `${fmtVal(metric(peak))} on ${shortDate(peak.date)}` : '-'}
+            {peak ? t('%1$s on %2$s', fmtVal(metric(peak)), shortDate(peak.date)) : '-'}
           </div>
         </div>
         <div className="mini-stat">
-          <div className="mini-stat-label">Yesterday</div>
+          <div className="mini-stat-label">{t('Yesterday')}</div>
           <div className="mini-stat-value">{yesterday ? fmtVal(metric(yesterday)) : '-'}</div>
         </div>
       </div>

@@ -2,6 +2,7 @@ import type { DailyEntry } from '../lib/payload'
 import type { CurrencyState } from '../lib/currency'
 import { formatCurrency, formatCompactCurrency } from '../lib/currency'
 import { computeHistoryStats } from '../lib/history'
+import { t } from '../lib/i18n'
 import { ArrowUpRight, ArrowDownRight } from './Icons'
 
 const WEEK_DAYS = 7
@@ -21,26 +22,26 @@ export function ForecastInsight({ days, currency }: Props) {
     <div className="forecast-insight">
       <div className="insight-header">
         <div>
-          <div className="insight-sublabel">Month-to-date</div>
+          <div className="insight-sublabel">{t('Month-to-date')}</div>
           <div className="forecast-mtd">{formatCurrency(s.monthToDate, currency)}</div>
         </div>
         <div className="forecast-right">
-          <div className="insight-sublabel">On pace for</div>
+          <div className="insight-sublabel">{t('On pace for')}</div>
           <div className="forecast-projection">{formatCurrency(s.monthProjection, currency)}</div>
         </div>
       </div>
 
       <div className="mini-stats">
         <div className="mini-stat">
-          <div className="mini-stat-label">Avg/day (this wk)</div>
+          <div className="mini-stat-label">{t('Avg/day (this wk)')}</div>
           <div className="mini-stat-value">{formatCompactCurrency(s.weekTotal / WEEK_DAYS, currency)}</div>
         </div>
         <div className="mini-stat">
-          <div className="mini-stat-label">Yesterday</div>
+          <div className="mini-stat-label">{t('Yesterday')}</div>
           <div className="mini-stat-value">{formatCompactCurrency(s.yesterday, currency)}</div>
         </div>
         <div className="mini-stat">
-          <div className="mini-stat-label">Last 7d</div>
+          <div className="mini-stat-label">{t('Last 7d')}</div>
           <div className="mini-stat-value">{formatCompactCurrency(s.weekTotal, currency)}</div>
         </div>
       </div>
@@ -49,8 +50,11 @@ export function ForecastInsight({ days, currency }: Props) {
         <div className="delta-badge delta-badge-block">
           {prevDelta >= 0 ? <ArrowUpRight size={9} /> : <ArrowDownRight size={9} />}
           <span>
-            {prevDelta >= 0 ? '+' : ''}{Math.round(prevDelta)}% vs last month
-            ({formatCompactCurrency(s.previousMonthTotal, currency)})
+            {t(
+              '%1$s%% vs last month (%2$s)',
+              `${prevDelta >= 0 ? '+' : ''}${Math.round(prevDelta)}`,
+              formatCompactCurrency(s.previousMonthTotal, currency),
+            )}
           </span>
         </div>
       )}

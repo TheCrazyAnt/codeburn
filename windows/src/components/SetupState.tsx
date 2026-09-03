@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { BurnFlame } from './LoadingOverlay'
 import { WarningIcon } from './Icons'
+import { t } from '../lib/i18n'
 
 /// Shown instead of the data views when the CLI is missing or too old. This is what a
 /// brand-new Windows user sees, so it has to explain the one thing they need to do.
@@ -40,30 +41,30 @@ export function SetupState({ status, checking, onCheckAgain }: Props) {
     <section className="setup">
       <BurnFlame size={44} />
       <h2 className="setup-title">
-        {outdated ? 'Update the CodeBurn CLI' : 'Install the CodeBurn CLI'}
+        {outdated ? t('Update the CodeBurn CLI') : t('Install the CodeBurn CLI')}
       </h2>
       <p className="setup-copy">
         {outdated
-          ? `This app needs codeburn ${status.min_version} or newer; version ${status.version} was found.`
-          : 'The tray app reads everything through the codeburn command line tool, which is not installed on this machine yet.'}
+          ? t('This app needs codeburn %1$s or newer; version %2$s was found.', status.min_version, status.version)
+          : t('The tray app reads everything through the codeburn command line tool, which is not installed on this machine yet.')}
       </p>
       <div className="setup-command">
         <code>{INSTALL_COMMAND}</code>
-        <button type="button" className="btn" onClick={copy}>{copied ? 'Copied' : 'Copy'}</button>
+        <button type="button" className="btn" onClick={copy}>{copied ? t('Copied') : t('Copy')}</button>
       </div>
       <p className="setup-copy setup-copy-muted">
-        Requires Node.js 22 or newer. After installing, click Check again; no restart needed.
+        {t('Requires Node.js 22 or newer. After installing, click Check again; no restart needed.')}
       </p>
       <div className="setup-actions">
         <button type="button" className="btn btn-prominent" onClick={onCheckAgain} disabled={checking}>
-          {checking ? 'Checking…' : 'Check again'}
+          {checking ? t('Checking…') : t('Check again')}
         </button>
       </div>
       {status.error && (
         <details className="setup-details">
-          <summary><WarningIcon size={9} filled={false} /> Details</summary>
+          <summary><WarningIcon size={9} filled={false} /> {t('Details')}</summary>
           <div className="setup-error">{status.error}</div>
-          <div className="setup-error-muted">Looked for: {status.program}</div>
+          <div className="setup-error-muted">{t('Looked for: %s', status.program)}</div>
         </details>
       )}
     </section>
