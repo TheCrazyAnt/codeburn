@@ -34,7 +34,7 @@ irm https://raw.githubusercontent.com/TheCrazyAnt/codeburn/zh-hans/windows/Scrip
 只装命令行即可，终端和网页仪表盘都已汉化：
 
 ```bash
-npm install -g https://github.com/TheCrazyAnt/codeburn/releases/download/cli-v0.9.23-zh1/codeburn-0.9.23-zh1.tgz
+npm install -g https://github.com/TheCrazyAnt/codeburn/releases/download/cli-v0.9.23-zh2/codeburn-0.9.23-zh2.tgz
 codeburn lang zh-CN
 ```
 
@@ -75,12 +75,32 @@ defaults write org.agentseal.codeburn-menubar CodeBurnCapacityDockAutoHide -bool
 
 ## 排行榜（可选，默认关闭）
 
-在弹窗的「排行榜」标签或 设置 › 排行榜 里用 GitHub 账号登录（设备码登录，不需要密码）并打开「参与排行榜」后，应用每小时把 **本月 / 累计的花费（美元）、token 总数、调用次数** 上传到 [codeburn-leaderboard.tangyishun9846.workers.dev](https://codeburn-leaderboard.tangyishun9846.workers.dev)，弹窗里的「排行榜」标签和网页都能看到榜单。榜单按 **本周 / 本月 / 累计** 三个周期，和 **产出（模型输出 token）/ 花费 / 活跃（连续活跃天数）** 三个指标自由切换，默认看产出。
+**看榜**：任何人任何系统，浏览器打开 [codeburn-leaderboard.tangyishun9846.workers.dev](https://codeburn-leaderboard.tangyishun9846.workers.dev) 即可，不用登录、不用装东西。也可以在终端里看：
 
+```bash
+codeburn leaderboard
+codeburn leaderboard --board week --metric output
+```
+
+榜单按 **本周 / 本月 / 累计** 三个周期，和 **产出（模型输出 token）/ 花费 / 连续活跃（连续有调用的天数）** 三个指标自由切换。
+
+**上榜**：三个平台都可以。
+
+```bash
+codeburn leaderboard login    # GitHub 设备码登录，终端里显示验证码
+codeburn leaderboard join     # 开启共享并立即上传
+codeburn leaderboard status   # 看自己的排名和共享状态
+```
+
+macOS 用户也可以在菜单栏弹窗的「排行榜」标签里一键完成。
+
+**隐私**
+
+- 只上传汇总数字：花费（美元）、token 总数、调用次数、活跃天数，以及按服务商的花费拆分。
 - 永远不会上传：项目名、会话内容、文件路径、模型提示词、API key。
-- 身份来自 GitHub（设备登录，不需要密码），一人一号；服务器会校验数字是否合理（累计不能倒退、单日增长上限、每百万 token 单价区间），异常账号自动隐藏。
-- 随时可以在设置里「删除我的数据」，服务器端会整条删除。
-- 后端是 Cloudflare Worker + D1，源码在 [leaderboard/](leaderboard/)，可以自己部署一套并在应用里改服务器地址（`defaults write org.agentseal.codeburn-menubar CodeBurnLeaderboardServer "https://你的域名"`）。
+- 身份来自 GitHub（设备码登录，不需要密码），一人一号。服务器会校验数字是否合理（累计不能倒退、单日增长上限、每百万 token 单价区间），异常账号自动隐藏。
+- 随时可以退出或删除：`codeburn leaderboard leave` 停止共享，`codeburn leaderboard delete` 让服务器整条删除你的数据。
+- 后端是 Cloudflare Worker + D1，源码在 [leaderboard/](leaderboard/)，可以自己部署一套并改服务器地址（命令行用 `CODEBURN_LEADERBOARD_SERVER` 环境变量，macOS 用 `defaults write org.agentseal.codeburn-menubar CodeBurnLeaderboardServer "https://你的域名"`）。
 
 ## 从源码构建
 
