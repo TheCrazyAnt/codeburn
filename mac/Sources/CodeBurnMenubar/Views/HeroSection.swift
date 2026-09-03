@@ -131,13 +131,32 @@ struct HeroSection: View {
         return label
     }
 
-    /// CLI period labels arrive as English text ("Last 7 Days", "Today (2026-09-03)").
-    /// Plain labels are looked up as-is; day-prefixed forms localize their prefix.
+    /// CLI period labels arrive as English text ("Last 7 Days", "Today (2026-09-03)",
+    /// "September 2026"). Plain labels are looked up as-is; day-prefixed forms
+    /// localize their prefix; a month-and-year label is reformatted for the UI
+    /// locale, since its English month name can never be a catalog key.
     private func localizedPeriodLabel(_ raw: String) -> String {
         for prefix in ["Today", "Yesterday"] where raw.hasPrefix(prefix + " (") {
             return LR(prefix) + String(raw.dropFirst(prefix.count))
         }
+        if let monthYear = Self.localizedMonthYear(raw) { return monthYear }
         return LR(raw)
+    }
+
+    /// Reformats an English "<Month> <Year>" label (the CLI's calendar-month
+    /// period) into the UI locale, e.g. "2026年9月". Returns nil for anything
+    /// that is not that shape, so other labels fall through untouched.
+    static func localizedMonthYear(_ raw: String) -> String? {
+        let parts = raw.split(separator: " ")
+        guard parts.count == 2, let year = Int(parts[1]), year > 1900, year < 3000 else { return nil }
+        let english = DateFormatter()
+        english.locale = Locale(identifier: "en_US_POSIX")
+        english.dateFormat = "MMMM yyyy"
+        guard let date = english.date(from: raw) else { return nil }
+        let localized = DateFormatter()
+        localized.locale = .current
+        localized.setLocalizedDateFormatFromTemplate("yyyyMMMM")
+        return localized.string(from: date)
     }
 
     /// Local-model savings caption shown beneath the hero amount when the

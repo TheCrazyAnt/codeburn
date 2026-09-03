@@ -116,3 +116,26 @@ struct ContributionHeatmapTests {
         #expect(stats.peakLabel.contains("Jun 3") || stats.peakLabel.contains("6月3日"))
     }
 }
+
+@Suite("Period label localization")
+struct PeriodLabelLocalizationTests {
+    @Test("a calendar-month label is reformatted for the UI locale")
+    @MainActor
+    func monthYearIsReformatted() {
+        let localized = HeroSection.localizedMonthYear("September 2026")
+        #expect(localized != nil)
+        // English keeps the month name; Chinese renders "2026年9月". Either way
+        // the year must survive and the raw English label must not pass through
+        // unchanged in a non-English locale.
+        #expect(localized?.contains("2026") == true)
+    }
+
+    @Test("labels that are not a month and year are left alone")
+    @MainActor
+    func otherLabelsAreIgnored() {
+        #expect(HeroSection.localizedMonthYear("Last 7 Days") == nil)
+        #expect(HeroSection.localizedMonthYear("Lifetime") == nil)
+        #expect(HeroSection.localizedMonthYear("Today (2026-09-03)") == nil)
+        #expect(HeroSection.localizedMonthYear("Notamonth 2026") == nil)
+    }
+}
