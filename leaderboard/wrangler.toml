@@ -1,0 +1,22 @@
+name = "codeburn-leaderboard"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+
+# Observability (free tier friendly; disable if you do not want request logs)
+[observability]
+enabled = true
+
+[vars]
+# GitHub OAuth App client ID (Device Flow enabled). Replace after creating the app.
+GITHUB_CLIENT_ID = "Ov23lit8pPEBsBTOKiMP"
+# Client upload cadence advertised via GET /v1/config
+UPLOAD_INTERVAL_MINUTES = "60"
+# Minimum app version advertised via GET /v1/config
+MIN_APP_VERSION = "0.9.23"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "codeburn-leaderboard"
+# Replace with the id printed by `npx wrangler d1 create codeburn-leaderboard`
+database_id = "cd826802-cc0d-4f59-9876-1be1e5a00cc1"
+migrations_dir = "migrations"

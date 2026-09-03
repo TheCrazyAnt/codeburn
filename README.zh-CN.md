@@ -38,6 +38,15 @@ curl -fsSL https://raw.githubusercontent.com/TheCrazyAnt/codeburn/zh-hans/mac/Sc
 defaults write org.agentseal.codeburn-menubar CodeBurnCapacityDockAutoHide -bool true
 ```
 
+## 排行榜（可选，默认关闭）
+
+设置 › 排行榜 里用 GitHub 账号登录并打开「参与排行榜」后，应用每小时把 **本月 / 累计的花费（美元）、token 总数、调用次数** 上传到 [codeburn-leaderboard.tangyishun9846.workers.dev](https://codeburn-leaderboard.tangyishun9846.workers.dev)，弹窗里的「排行榜」标签和网页都能看到榜单。
+
+- 永远不会上传：项目名、会话内容、文件路径、模型提示词、API key。
+- 身份来自 GitHub（设备登录，不需要密码），一人一号；服务器会校验数字是否合理（累计不能倒退、单日增长上限、每百万 token 单价区间），异常账号自动隐藏。
+- 随时可以在设置里「删除我的数据」，服务器端会整条删除。
+- 后端是 Cloudflare Worker + D1，源码在 [leaderboard/](leaderboard/)，可以自己部署一套并在应用里改服务器地址（`defaults write org.agentseal.codeburn-menubar CodeBurnLeaderboardServer "https://你的域名"`）。
+
 ## 从源码构建
 
 ```bash

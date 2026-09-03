@@ -284,6 +284,11 @@ struct CurrentBlock: Codable, Sendable {
     let oneShotRate: Double?
     let inputTokens: Int
     let outputTokens: Int
+    /// Period-scoped cache token totals the CLI emits alongside `cacheHitPercent`.
+    /// Default 0 for payloads from a CLI that predates the fields. The hero
+    /// deliberately excludes these; the leaderboard report includes them.
+    var cacheReadTokens: Int = 0
+    var cacheWriteTokens: Int = 0
     let cacheHitPercent: Double
     /// Codex credits consumed in the period (nil on payloads from older builds).
     let codexCredits: Double?
@@ -329,7 +334,7 @@ struct PullRequestRow: Codable, Sendable {
 extension CurrentBlock {
     enum CodingKeys: String, CodingKey {
         case label, cost, calls, sessions, oneShotRate, inputTokens, outputTokens,
-             cacheHitPercent, codexCredits, topActivities, topModels, localModelSavings, providers, providerDetails, topProjects,
+             cacheReadTokens, cacheWriteTokens, cacheHitPercent, codexCredits, topActivities, topModels, localModelSavings, providers, providerDetails, topProjects,
              modelEfficiency, topSessions, retryTax, routingWaste,
              tools, skills, subagents, mcpServers,
              workflow, topReworkedFiles, pullRequests
@@ -343,6 +348,8 @@ extension CurrentBlock {
         oneShotRate = try c.decodeIfPresent(Double.self, forKey: .oneShotRate)
         inputTokens = try c.decode(Int.self, forKey: .inputTokens)
         outputTokens = try c.decode(Int.self, forKey: .outputTokens)
+        cacheReadTokens = try c.decodeIfPresent(Int.self, forKey: .cacheReadTokens) ?? 0
+        cacheWriteTokens = try c.decodeIfPresent(Int.self, forKey: .cacheWriteTokens) ?? 0
         cacheHitPercent = try c.decodeIfPresent(Double.self, forKey: .cacheHitPercent) ?? 0
         codexCredits = try c.decodeIfPresent(Double.self, forKey: .codexCredits)
         topActivities = try c.decodeIfPresent([ActivityEntry].self, forKey: .topActivities) ?? []

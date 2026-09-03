@@ -395,6 +395,13 @@ final class AppStore {
         cache[periodAllKey]?.payload
     }
 
+    /// The local all-provider payload cached for `period`, under the same key
+    /// `refreshQuietly(period:)` fills. The leaderboard report reads its month
+    /// and lifetime totals through this after refreshing both periods.
+    func allProviderPayload(for period: Period) -> MenubarPayload? {
+        cache[PayloadCacheKey(scope: .local, period: period, provider: .all, day: nil, claudeConfigSourceId: selectedClaudeConfigSourceId)]?.payload
+    }
+
     var claudeConfigOptions: [ClaudeConfigOption] {
         payload.claudeConfigs?.options
             ?? periodAllPayload?.claudeConfigs?.options
@@ -2651,6 +2658,7 @@ enum InsightMode: String, CaseIterable, Identifiable {
     case pulse = "Pulse"
     case stats = "Stats"
     case optimize = "Optimize"
+    case leaderboard = "Leaderboard"
     var id: String { rawValue }
 
     /// Localized label for display; rawValue stays the stable identifier.

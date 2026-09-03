@@ -19,7 +19,7 @@ struct SettingsView: View {
         let isConnected: Bool
     }
 
-    private static let mainPaneIDs: Set<String> = ["general", "about"]
+    private static let mainPaneIDs: Set<String> = ["general", "leaderboard", "about"]
 
     private var providers: [ProviderPane] {
         // Only surface providers CodeBurn actually has a live quota adapter for;
@@ -108,6 +108,7 @@ struct SettingsView: View {
             List(selection: selection) {
                 Section {
                     SettingsSidebarPaneRow(pane: "general", title: L("General"), systemImage: "gearshape.fill", color: .gray)
+                    SettingsSidebarPaneRow(pane: "leaderboard", title: L("Leaderboard"), systemImage: "trophy.fill", color: .orange)
                     SettingsSidebarAboutRow()
                 }
                 Section {
@@ -135,6 +136,7 @@ struct SettingsView: View {
     private var currentPaneTitle: String {
         switch selection.wrappedValue {
         case "general": return L("General")
+        case "leaderboard": return L("Leaderboard")
         case "about": return L("About")
         default:
             return providers.first { $0.id == selection.wrappedValue }?.name ?? L("Settings")
@@ -151,6 +153,7 @@ struct SettingsView: View {
         case "gemini": GeminiSettingsTab()
         case "copilot": CopilotSettingsTab()
         case "antigravity": AntigravitySettingsTab()
+        case "leaderboard": LeaderboardSettingsTab()
         case "about": AboutSettingsTab()
         default:
             if let provider = CapacityDockProvider(rawValue: selection.wrappedValue) {

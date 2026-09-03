@@ -98,6 +98,7 @@ struct HeatmapSection: View {
         case .pulse: PulseInsight(payload: store.payload)
         case .stats: StatsInsight(payload: store.payload)
         case .optimize: OptimizeInsight(payload: store.payload)
+        case .leaderboard: LeaderboardSection()
         }
     }
 }

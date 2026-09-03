@@ -63,6 +63,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
     private var contextMenu: NSMenu?
     fileprivate let store = AppStore()
     let updateChecker = UpdateChecker()
+    /// Opt-in public leaderboard client. Owned here (not by AppStore) because
+    /// it reads the store's period cache and would otherwise form a cycle.
+    fileprivate lazy var leaderboard = LeaderboardService(store: store)
     /// True while the displays are asleep. Refresh ticks skip spawning
     /// entirely then: nobody can see the menubar, and every fetch is a full
     /// Node process (#647).
@@ -173,6 +176,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
         registerLoginItemIfNeeded()
         observeSubscriptionDisconnect()
         observeCapacityDockProviderSettingsRequests()
+        leaderboard.start()
         Task { await updateChecker.checkIfNeeded() }
     }
 
@@ -370,6 +374,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
     private func recordSuccessfulUsageDataSnapshot() {
         lastSuccessfulUsageDataSnapshot = UsageDataChangeGuard.snapshot()
         lastSuccessfulUsageDataSnapshotAt = Date()
+        // First successful load arms the leaderboard upload scheduler.
+        leaderboard.noteUsageDataLoaded()
     }
 
     private func shouldSkipBackgroundUsageRefresh() -> Bool {
@@ -1433,6 +1439,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
         let content = MenuBarContent()
             .environment(store)
             .environment(updateChecker)
+            .environment(leaderboard)
             .frame(width: popoverWidth)
 
         popover.contentViewController = NSHostingController(rootView: content)
@@ -1593,7 +1600,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
         }
 
         let hosting = NSHostingController(
-            rootView: SettingsView().environment(store).environment(updateChecker)
+            rootView: SettingsView().environment(store).environment(updateChecker).environment(leaderboard)
         )
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 520, height: 380),
