@@ -1,4 +1,4 @@
-> 🇨🇳 **中文用户**：本分支提供菜单栏应用的简体中文界面和 Capacity Dock 自动隐藏功能，安装方法见 [README.zh-CN.md](README.zh-CN.md)。
+> 🇨🇳 **中文用户**：本分支提供命令行、网页仪表盘、macOS 菜单栏和 Windows 托盘的简体中文界面，Windows 托盘应用功能与 macOS 对齐，另有 Capacity Dock 自动隐藏和可选排行榜。一键安装和说明见 [README.zh-CN.md](README.zh-CN.md)。
 
 <table align="center">
   <tr>
