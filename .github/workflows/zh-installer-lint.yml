@@ -66,9 +66,18 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 22.13.0
-      - name: Run install-zh.ps1 -CliOnly
+      - name: Run install-zh.ps1 -CliOnly under a Restricted execution policy
+        # Windows Server and locked-down machines block .ps1 files, and npm ships
+        # an npm.ps1 that PowerShell prefers — which killed the install before it
+        # could even reach its own policy warning. Run the way a real user does
+        # (piped into iex, which Restricted still allows) with the policy set to
+        # Restricted, so that failure mode is caught here rather than by a user.
         shell: pwsh
-        run: ./windows/Scripts/install-zh.ps1 -CliOnly
+        run: |
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Restricted -Force
+          Write-Host "policy: $(Get-ExecutionPolicy -Scope Process)"
+          $source = Get-Content -Raw ./windows/Scripts/install-zh.ps1
+          & ([scriptblock]::Create($source)) -CliOnly
       - name: codeburn.cmd must work even when .ps1 execution is blocked
         # Windows Server and locked-down machines default to a Restricted
         # execution policy, which blocks the codeburn.ps1 shim npm installs.

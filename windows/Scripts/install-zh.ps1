@@ -24,10 +24,22 @@ function Die ($m) { Write-Host "x $m" -ForegroundColor Red; exit 1 }
 
 if (-not $IsWindows -and $PSVersionTable.PSVersion.Major -ge 6) { Die '这个脚本只支持 Windows。' }
 
-if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
+# PowerShell 优先选用 npm 自带的 npm.ps1，而 Windows Server / 收紧过策略的机器
+# 默认禁止运行 .ps1 文件，于是 npm 调用直接失败。这里解析出 .cmd/.exe 形式再调用。
+function Resolve-Exe ([string]$name) {
+  foreach ($candidate in @(Get-Command $name -All -ErrorAction SilentlyContinue)) {
+    if ($candidate.Source -and $candidate.Source -notmatch '\.ps1$') { return $candidate.Source }
+  }
+  return $null
+}
+
+$npm = Resolve-Exe 'npm'
+if (-not $npm) {
   Die '没有找到 npm。请先安装 Node.js 22.13 或更高版本：https://nodejs.org'
 }
-$nodeVersion = (& node -p 'process.versions.node' 2>$null)
+$node = Resolve-Exe 'node'
+if (-not $node) { Die '没有找到 node。请先安装 Node.js 22.13 或更高版本：https://nodejs.org' }
+$nodeVersion = (& $node -p 'process.versions.node' 2>$null)
 if ($LASTEXITCODE -ne 0 -or -not $nodeVersion) { Die '没有找到 node。请先安装 Node.js 22.13 或更高版本：https://nodejs.org' }
 $nodeParts = $nodeVersion.Split('.')
 if ([int]$nodeParts[0] -lt 22 -or ([int]$nodeParts[0] -eq 22 -and [int]$nodeParts[1] -lt 13)) {
@@ -89,15 +101,15 @@ try {
   Get-Verified $cli $tgz $headers
 
   Say '安装命令行（npm install -g）...'
-  & npm install -g $tgz 2>&1 | Out-Null
+  & $npm install -g $tgz 2>&1 | Out-Null
   if ($LASTEXITCODE -ne 0) { Die "npm 安装失败。可以手动执行：npm install -g $($cli.Url)" }
 
   # npm 把全局命令装到它自己的 prefix 目录下，而 PowerShell 的 $env:PATH 是进程
   # 启动时的快照 —— 首次全局安装时那个目录往往还不在里面。所以直接问 npm 要路径，
   # 而不是依赖 Get-Command。
-  $codeburnCmd = (Get-Command codeburn -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+  $codeburnCmd = Resolve-Exe 'codeburn' 
   if (-not $codeburnCmd) {
-    $npmPrefix = (& npm prefix -g 2>$null | Select-Object -First 1)
+    $npmPrefix = (& $npm prefix -g 2>$null | Select-Object -First 1)
     if ($npmPrefix) {
       $npmPrefix = $npmPrefix.Trim()
       foreach ($candidate in @(
