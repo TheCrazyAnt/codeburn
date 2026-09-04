@@ -69,6 +69,17 @@ jobs:
       - name: Run install-zh.ps1 -CliOnly
         shell: pwsh
         run: ./windows/Scripts/install-zh.ps1 -CliOnly
+      - name: codeburn.cmd must work even when .ps1 execution is blocked
+        # Windows Server and locked-down machines default to a Restricted
+        # execution policy, which blocks the codeburn.ps1 shim npm installs.
+        # The .cmd shim is the escape hatch the installer points users at, so
+        # it has to actually work.
+        shell: pwsh
+        run: |
+          $out = (& codeburn.cmd --version)
+          Write-Host "codeburn.cmd version: $out"
+          if (-not $out) { throw 'codeburn.cmd produced no version' }
+
       - name: codeburn must be usable in a fresh shell
         shell: pwsh
         run: |

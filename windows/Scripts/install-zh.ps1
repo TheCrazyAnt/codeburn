@@ -114,6 +114,16 @@ try {
     }
   }
 
+  # PowerShell 优先执行 npm 装出的 codeburn.ps1，而 Windows Server（以及被组策略
+  # 收紧的机器）默认禁止运行 .ps1 文件。安装脚本自身走 iex 在内存里执行，不受影响，
+  # 但装完之后每次敲 codeburn 都会被拦，所以这里提前检出并给出办法。
+  $policy = try { Get-ExecutionPolicy -Scope CurrentUser } catch { 'Undefined' }
+  if ($policy -in @('Restricted', 'AllSigned')) {
+    $script:ExecutionPolicyBlocked = $true
+  } elseif ((try { Get-ExecutionPolicy } catch { 'Undefined' }) -in @('Restricted', 'AllSigned')) {
+    $script:ExecutionPolicyBlocked = $true
+  }
+
   if ($codeburnCmd) {
     Say '设置界面语言为简体中文 ...'
     & $codeburnCmd lang zh-CN 2>&1 | Out-Null
@@ -129,6 +139,14 @@ try {
     if (-not $codeburnCmd) { Write-Host '  请先重开一个 PowerShell 窗口，然后：' -ForegroundColor Yellow }
     Write-Host '  试试：codeburn      终端仪表盘'
     Write-Host '        codeburn web  浏览器仪表盘'
+  if ($script:ExecutionPolicyBlocked) {
+    Write-Host ''
+    Write-Host '! PowerShell 当前禁止运行脚本文件，直接敲 codeburn 会报 UnauthorizedAccess。' -ForegroundColor Yellow
+    Write-Host '  二选一：' -ForegroundColor Yellow
+    Write-Host '    1) 用 codeburn.cmd 代替 codeburn，例如：codeburn.cmd today' -ForegroundColor Yellow
+    Write-Host '    2) 执行一次（只影响当前用户，无需管理员）：' -ForegroundColor Yellow
+    Write-Host '       Set-ExecutionPolicy -Scope CurrentUser RemoteSigned' -ForegroundColor Yellow
+  }
     return
   }
 
@@ -160,6 +178,14 @@ try {
   if (-not $codeburnCmd) { Write-Host '  注意：需要重开一个 PowerShell 窗口，codeburn 命令才会生效。' -ForegroundColor Yellow }
   Write-Host "  托盘应用 $($msi.Tag)：任务栏右下角会出现 CodeBurn 图标。"
   if ($proc.ExitCode -eq 3010) { Write-Host '  提示：安装程序建议重启一次电脑。' -ForegroundColor Yellow }
+  if ($script:ExecutionPolicyBlocked) {
+    Write-Host ''
+    Write-Host '! PowerShell 当前禁止运行脚本文件，直接敲 codeburn 会报 UnauthorizedAccess。' -ForegroundColor Yellow
+    Write-Host '  二选一：' -ForegroundColor Yellow
+    Write-Host '    1) 用 codeburn.cmd 代替 codeburn，例如：codeburn.cmd today' -ForegroundColor Yellow
+    Write-Host '    2) 执行一次（只影响当前用户，无需管理员）：' -ForegroundColor Yellow
+    Write-Host '       Set-ExecutionPolicy -Scope CurrentUser RemoteSigned' -ForegroundColor Yellow
+  }
 } finally {
   Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
 }
