@@ -361,24 +361,10 @@ export function evaluateReport(
     if (delta > cap) {
       reasons.push(`growth_cap: +${delta.toFixed(2)} USD in ${hours.toFixed(1)}h exceeds ${cap.toFixed(2)} USD`);
     }
-    // Days can only accrue one per calendar day: the streak / active-day
-    // counters may grow by at most (whole days elapsed + 1) between reports.
-    // A previous report that never carried the day counters (older client,
-    // or the field was absent) has nothing to compare against: the first
-    // report with counters may legitimately jump from 0 to any value.
-    const maxDayGain = Math.floor(hours / 24) + 1;
-    const previousHadDays = (previous.activeDays ?? 0) > 0 || (previous.streakDays ?? 0) > 0;
-    const dayChecks: Array<[string, number | null, number]> = previousHadDays
-      ? [
-          ["streak_growth", report.streakDays, previous.streakDays ?? 0],
-          ["active_days_growth", report.activeDays, previous.activeDays ?? 0],
-        ]
-      : [];
-    for (const [name, value, before] of dayChecks) {
-      if (value !== null && value - before > maxDayGain) {
-        reasons.push(`${name}: ${before} → ${value} in ${hours.toFixed(1)}h exceeds +${maxDayGain} days`);
-      }
-    }
+    // No growth check on streakDays / activeDays. They are recounted from the
+    // client's daily history on every report, not incremented, so a longer
+    // history window legitimately reveals more active days in one step. The
+    // absolute bound in validateReport is what keeps them sane.
   }
 
   if (report.lifetimeTokens > 0) {

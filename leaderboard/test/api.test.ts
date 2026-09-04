@@ -501,17 +501,30 @@ describe("POST /v1/report", () => {
     expect(board.data.entries).toEqual([]);
   });
 
-  it("flagged is sticky: later clean reports stay hidden, and 'me' reports flagged: true", async () => {
+  it("a flagged report hides the user, and 'me' reports flagged: true", async () => {
+    const token = await signIn(OCTOCAT);
+    const bad = await postReport(token, reportBody({ lifetimeTokens: 1_000_000, monthTokens: 500_000 }));
+    expect(bad.status).toBe(200);
+    expect(await bad.json()).toMatchObject({ ok: true, flagged: true });
+
+    const board = await getBoard("?board=month", token);
+    expect(board.data.entries).toEqual([]);
+    expect(board.data.me).toMatchObject({ rank: 1, flagged: true });
+  });
+
+  it("a later clean report clears the flag, so one false positive is not permanent", async () => {
+    // The flag used to be sticky, which meant a single implausible-looking
+    // report hid a real user forever unless someone edited the database.
     const token = await signIn(OCTOCAT);
     expect((await postReport(token, reportBody({ lifetimeTokens: 1_000_000, monthTokens: 500_000 }))).status).toBe(200);
     await backdateLastReport(OCTOCAT.id, 11 * 60_000);
     const clean = await postReport(token, reportBody());
     expect(clean.status).toBe(200);
-    expect(await clean.json()).toMatchObject({ ok: true, flagged: true });
+    expect(await clean.json()).toMatchObject({ ok: true, flagged: false });
 
     const board = await getBoard("?board=month", token);
-    expect(board.data.entries).toEqual([]);
-    expect(board.data.me).toMatchObject({ rank: 1, usd: 620.5, tokens: 20_000_000, calls: 900, flagged: true });
+    expect(board.data.entries).toHaveLength(1);
+    expect(board.data.me).toMatchObject({ rank: 1, flagged: false });
   });
 
   it("upserts the monthly row and keeps at most 500 report rows per user", async () => {
@@ -734,18 +747,18 @@ describe("metrics", () => {
     expect(week.output_tokens).toBe(100_000);
   });
 
-  it("422 when output tokens exceed total tokens; streak growth beyond elapsed days flags", async () => {
+  it("422 when output tokens exceed total tokens; a recounted day jump is accepted", async () => {
     const t = await signIn(OCTOCAT);
     expect((await postReport(t, reportBody(metrics({ monthOutputTokens: 20_000_001 })))).status).toBe(422);
     expect((await postReport(t, reportBody(metrics({ weekOutputTokens: 1_000_001 })))).status).toBe(422);
     expect((await postReport(t, reportBody(metrics({ streakDays: 50, activeDays: 40 })))).status).toBe(400);
     expect((await postReport(t, reportBody(metrics({})))).status).toBe(200);
-    await backdateLastReport(OCTOCAT.id, 2 * 3_600_000); // 2h → +1 day allowed
+    await backdateLastReport(OCTOCAT.id, 2 * 3_600_000);
+    // A bigger history window recounts more active days in one step; that is
+    // normal client behaviour, not evidence of tampering.
     const jump = await postReport(t, reportBody(metrics({ streakDays: 5, activeDays: 42 })));
     expect(jump.status).toBe(200);
-    const data: any = await jump.json();
-    expect(data.flagged).toBe(true);
-    expect(data.flagReasons.join(" ")).toMatch(/streak_growth/);
+    expect(await jump.json()).toMatchObject({ ok: true, flagged: false });
   });
 
   it("board ordering per metric with value echo; streak is the same scalar on every board, tie-broken by output", async () => {

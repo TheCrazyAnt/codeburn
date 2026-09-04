@@ -335,7 +335,11 @@ async function handleReport(request: Request, env: Env, nowMs: number): Promise<
     env.DB.prepare(
       `UPDATE users
           SET lifetime_usd = ?1, lifetime_tokens = ?2, lifetime_calls = ?3, top_provider = ?4,
-              flagged = MAX(flagged, ?5), app_version = ?6, last_report_at = ?7,
+              -- The flag tracks the latest report, not the worst one ever seen.
+              -- A sticky flag turned any single false positive into a permanent
+              -- ban that only a manual D1 edit could lift; the reports table
+              -- keeps the audit trail either way.
+              flagged = ?5, app_version = ?6, last_report_at = ?7,
               output_tokens = ?9, streak_days = ?10, active_days = ?11
         WHERE id = ?8`,
     ).bind(
@@ -385,7 +389,9 @@ async function handleReport(request: Request, env: Env, nowMs: number): Promise<
   }
   await env.DB.batch(statements);
 
-  const flagged = user.flagged === 1 || flaggedNow === 1;
+  // Report the verdict on THIS report, matching what was just written to the
+  // users row. ORing in the previous value is what made the flag sticky.
+  const flagged = flaggedNow === 1;
 
   // Ranks per metric × period. The streak is a per-user scalar, so it is the
   // same number on every board; only the population (who has a row for the

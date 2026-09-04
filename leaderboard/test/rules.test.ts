@@ -291,34 +291,17 @@ describe("evaluateReport — metric plausibility", () => {
     expect(week).toMatchObject({ verdict: "reject" });
     if (week.verdict === "reject") expect(week.message).toMatch(/weekOutputTokens/);
   });
-  it("first report carrying day counters after a client without them is not capped", () => {
-    // Older clients reported no streak/active days (stored as 0); upgrading
-    // must not flag the first real counters as impossible growth.
-    const prev = { lifetimeUsd: 31000, lastReportAtMs: NOW - 3_600_000, streakDays: 0, activeDays: 0 };
-    expect(evaluateReport(validReport({ streakDays: 40, activeDays: 103 }), prev, NOW)).toMatchObject({ flagged: false });
-  });
-  it("streak / active days may grow by at most (days elapsed + 1) since the previous report", () => {
-    const prev = { lifetimeUsd: 31000, lastReportAtMs: NOW - 3_600_000, streakDays: 10, activeDays: 50 }; // 1h → +1
+  it("recounted day totals are never treated as impossible growth", () => {
+    // streakDays / activeDays are recounted from the client's daily history on
+    // every report, so a longer history window legitimately reveals many more
+    // active days at once. Capping that jump flagged real users.
+    const prev = { lifetimeUsd: 31000, lastReportAtMs: NOW - 3_600_000, streakDays: 10, activeDays: 50 };
+    expect(evaluateReport(validReport({ streakDays: 40, activeDays: 105 }), prev, NOW)).toMatchObject({ flagged: false });
     expect(evaluateReport(validReport({ streakDays: 11, activeDays: 51 }), prev, NOW)).toMatchObject({ flagged: false });
-    const streak = evaluateReport(validReport({ streakDays: 12, activeDays: 51 }), prev, NOW);
-    expect(streak).toMatchObject({ verdict: "accept", flagged: true });
-    if (streak.verdict === "accept") expect(streak.reasons[0]).toMatch(/streak_growth/);
-    const active = evaluateReport(validReport({ streakDays: 11, activeDays: 52 }), prev, NOW);
-    expect(active).toMatchObject({ flagged: true });
-    if (active.verdict === "accept") expect(active.reasons[0]).toMatch(/active_days_growth/);
-
-    // 3 days later → +4 allowed; a broken streak (drop) is always fine
-    const later = { ...prev, lastReportAtMs: NOW - 3 * 24 * 3_600_000 };
-    expect(evaluateReport(validReport({ streakDays: 14, activeDays: 54 }), later, NOW)).toMatchObject({ flagged: false });
-    expect(evaluateReport(validReport({ streakDays: 15, activeDays: 54 }), later, NOW)).toMatchObject({ flagged: true });
-    expect(evaluateReport(validReport({ streakDays: 1, activeDays: 50 }), later, NOW)).toMatchObject({ flagged: false });
-    // absent fields are never judged; a first report is never capped
-    expect(evaluateReport(validReport(), prev, NOW)).toMatchObject({ flagged: false });
-    expect(evaluateReport(validReport({ streakDays: 3000, activeDays: 3000 }), null, NOW)).toMatchObject({ flagged: false });
+    // A drop (broken streak, shorter history) was always fine and still is.
+    expect(evaluateReport(validReport({ streakDays: 1, activeDays: 20 }), prev, NOW)).toMatchObject({ flagged: false });
   });
-});
 
-describe("rateLimitRetryAfter", () => {
   it("allows the first report and reports after 10 minutes", () => {
     expect(rateLimitRetryAfter(null, NOW)).toBe(0);
     expect(rateLimitRetryAfter(NOW - 10 * 60_000, NOW)).toBe(0);
