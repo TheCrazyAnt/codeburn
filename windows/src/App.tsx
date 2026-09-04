@@ -118,11 +118,13 @@ export function App() {
   const leaderboard = useLeaderboard()
 
   // The scope the query actually runs under. Combined reports every provider
-  // unfiltered and cannot be narrowed to days -- the CLI refuses both -- so a
-  // provider tab or a day pick views this machine, while the user's preference
-  // survives for when they return to All. Same call the mac makes in
-  // `effectiveSelectedScope`.
-  const effectiveScope: Scope = selectedDays.length > 0 || provider !== 'all' ? 'local' : scope
+  // unfiltered and takes at most one day -- the CLI refuses a provider filter
+  // and a multi-day `--days` under it -- so those views are this machine, while
+  // the user's preference survives for the return to All. The day rule is the
+  // mac's `effectiveSelectedScope` (`selectedDays.count > 1 ? .local`); the
+  // provider rule is stricter than the mac, which lets that combination reach
+  // the CLI and fail.
+  const effectiveScope: Scope = selectedDays.length > 1 || provider !== 'all' ? 'local' : scope
   const current: Selection = { period, provider, scope: effectiveScope, days: selectedDays }
   const currentKey = selectionKey(current)
   const selection = useRef(current)
@@ -351,11 +353,12 @@ export function App() {
   const switchScope = (s: Scope) => {
     setScope(s)
     writeSetting('scope', s === 'local' ? null : s)
-    // Combined is every provider, every day of the period: the tab and the day
-    // pick that would contradict it are cleared, as the mac does on the same switch.
+    // Combined is every provider: the tab that would contradict it is cleared,
+    // as the mac does on the same switch. A single picked day stays -- combined
+    // takes one `--day` -- but a multi-day pick cannot, so it goes too.
     if (s === 'combined') {
       setProvider('all')
-      setSelectedDays([])
+      if (selectedDays.length > 1) setSelectedDays([])
     }
   }
 

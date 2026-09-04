@@ -292,11 +292,13 @@ pub fn parse_version(text: &str) -> Option<(u32, u32, u32)> {
 }
 
 /// Assembles the argv for one popover selection. A day selection replaces the
-/// period (the CLI treats `--days` as overriding `--period`), and combined scope
-/// asks the CLI to merge every paired device. Pulled out of the spawn so the
-/// combinations the CLI rejects -- combined with a provider filter, or with a
-/// day selection -- are refused here with a readable reason instead of a stderr
-/// line the popover would surface as a generic failure.
+/// period (the CLI treats `--day` / `--days` as overriding `--period`): one day
+/// goes as `--day`, several as `--days`, the split the mac's DataClient makes,
+/// because the CLI accepts a single `--day` under combined scope but refuses
+/// `--days` there. Pulled out of the spawn so the combinations the CLI rejects
+/// -- combined with a provider filter, or with several days -- are refused here
+/// with a readable reason instead of a stderr line the popover would surface as
+/// a generic failure.
 fn menubar_args(
     period: &str,
     provider: &str,
@@ -317,8 +319,8 @@ fn menubar_args(
     if combined && provider != "all" {
         bail!("combined scope reports every provider; switch the provider tab to All");
     }
-    if combined && days.is_some() {
-        bail!("combined scope cannot be narrowed to single days");
+    if combined && days.is_some_and(|d| d.contains(',')) {
+        bail!("combined scope cannot be narrowed to several days");
     }
 
     let mut args: Vec<String> = ["status", "--format", "menubar-json"]
@@ -326,7 +328,8 @@ fn menubar_args(
         .map(String::from)
         .collect();
     match days {
-        Some(d) => args.extend(["--days".into(), d.into()]),
+        Some(d) if d.contains(',') => args.extend(["--days".into(), d.into()]),
+        Some(d) => args.extend(["--day".into(), d.into()]),
         None => args.extend(["--period".into(), period.into()]),
     }
     args.extend(["--provider".into(), provider.into()]);
@@ -680,13 +683,20 @@ mod tests {
         assert_eq!(argv, ["status", "--format", "menubar-json", "--period", "month", "--provider", "claude"]);
 
         // A day selection overrides the period; the period is not sent at all.
+        // Several days go as `--days`, one day as `--day`, like the mac DataClient.
         let argv = menubar_args("month", "all", None, Some("2026-09-01,2026-09-03"), false).unwrap();
         assert_eq!(
             argv,
             ["status", "--format", "menubar-json", "--days", "2026-09-01,2026-09-03", "--provider", "all", "--no-optimize"]
         );
+        let argv = menubar_args("month", "all", None, Some("2026-09-01"), true).unwrap();
+        assert_eq!(argv, ["status", "--format", "menubar-json", "--day", "2026-09-01", "--provider", "all"]);
 
         let argv = menubar_args("today", "all", Some("combined"), None, true).unwrap();
+        assert!(argv.windows(2).any(|w| w == ["--scope", "combined"]));
+        // One day under combined is allowed (the CLI takes `--day` with `--scope`).
+        let argv = menubar_args("today", "all", Some("combined"), Some("2026-09-01"), true).unwrap();
+        assert!(argv.windows(2).any(|w| w == ["--day", "2026-09-01"]));
         assert!(argv.windows(2).any(|w| w == ["--scope", "combined"]));
     }
 
@@ -695,7 +705,7 @@ mod tests {
     #[test]
     fn menubar_args_refuse_what_the_cli_would() {
         assert!(menubar_args("today", "claude", Some("combined"), None, true).is_err());
-        assert!(menubar_args("today", "all", Some("combined"), Some("2026-09-01"), true).is_err());
+        assert!(menubar_args("today", "all", Some("combined"), Some("2026-09-01,2026-09-02"), true).is_err());
         assert!(menubar_args("today", "all", None, Some("2026-9-1"), true).is_err());
         assert!(menubar_args("today", "all", None, Some("2026-09-01;rm"), true).is_err());
         assert!(menubar_args("today; rm", "all", None, None, true).is_err());
