@@ -2,6 +2,12 @@ import Foundation
 import Observation
 
 private let cacheTTLSeconds: TimeInterval = 30
+
+/// How much of the all-provider slice's figure a scoped payload has to still
+/// hold to be believable. Deliberately far below any honest drift between two
+/// runs seconds apart: this is here to catch a payload that is hours old, not
+/// to police rounding.
+private let staleScopedShare = 0.5
 private let interactiveRefreshResetSeconds: TimeInterval = 120
 private let menubarPeriodDefaultsKey = "CodeBurnMenubarPeriod"
 
@@ -1017,6 +1023,20 @@ final class AppStore {
         // its calls but loses the spend (or vice versa) is still stale.
         if allCost > 0, payload.current.cost == 0 { return true }
         if let allCalls, allCalls > 0, payload.current.calls == 0 { return true }
+
+        // Zero is not the only shape staleness takes. These are two CLI runs of
+        // the same period seconds apart, so they agree to within a few percent
+        // (measured: $496.25 against $494.59 on a corpus actively being written
+        // to). A scoped payload holding a small fraction of what the same period
+        // already attributes to this provider is a snapshot from hours ago --
+        // and serving it prints the tab's figure above a much smaller one, on
+        // screen at the same time, which reads as the app being wrong.
+        //
+        // Spend only. The same ratio on `calls` buys nothing the spend check
+        // does not already catch, and misfires on small counts where a
+        // difference of one is a large fraction -- it is the number on screen
+        // that has to be defensible, not every dimension behind it.
+        if allCost > 0, payload.current.cost < allCost * staleScopedShare { return true }
 
         // `hasUsage` is authoritative for subscription/token-only providers,
         // where both cost and behavioral calls may legitimately be zero.

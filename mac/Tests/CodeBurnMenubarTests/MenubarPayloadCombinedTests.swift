@@ -31,6 +31,23 @@ struct MenubarPayloadCombinedTests {
         #expect(totals.totalTokens == 1500)
     }
 
+    /// The hero prints throughput, not new tokens: on a real corpus cache reads
+    /// are ~99% of the volume, so `totalTokens` alone reads as a broken number
+    /// next to any other usage tool. Both figures have to stay derivable --
+    /// `totalTokens` is what the spend relates to, `throughputTokens` is the
+    /// answer to "how many tokens did I use".
+    @Test("combined hero throughput counts cache reads and writes")
+    func combinedHeroThroughputCountsCacheTokens() throws {
+        let payload = try JSONDecoder().decode(MenubarPayload.self, from: combinedPayloadJSON())
+        let totals = HeroTotals(payload: payload, activeScope: .combined)
+
+        #expect(totals.cacheReadTokens == 300)
+        #expect(totals.cacheWriteTokens == 200)
+        #expect(totals.throughputTokens == 2000)
+        // And it agrees with what the CLI itself computed for the same period.
+        #expect(totals.throughputTokens == payload.combined?.combined.totalTokens)
+    }
+
     @Test("combined block is nil when absent")
     func combinedBlockIsNilWhenAbsent() throws {
         let json = Data("""

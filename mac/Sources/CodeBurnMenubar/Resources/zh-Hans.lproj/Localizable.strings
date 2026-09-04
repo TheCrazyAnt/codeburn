@@ -810,3 +810,9 @@
 "tokens" = "token 数";
 "vs %@ @ %@/edit" = "对比 %@ @ 每次编辑 %@";
 "© 2026 Resham Joshi (iamtoruk) · AgentSeal. MIT License." = "© 2026 Resham Joshi (iamtoruk) · AgentSeal。MIT 许可证。";
+
+/* Hero token breakdown tooltip */
+"new %@" = "新增 %@";
+"in %@ · out %@" = "输入 %@ · 输出 %@";
+"cache %@" = "缓存 %@";
+"read %@ · write %@" = "读 %@ · 写 %@";

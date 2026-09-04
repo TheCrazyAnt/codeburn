@@ -155,6 +155,70 @@ struct AppStoreRefreshRecoveryTests {
         #expect(store.providerPayloadContradictsAllForTesting(missingSpend, period: .today, provider: .hermes))
     }
 
+    /// The reported bug: the provider tab advertised ¥3032 while the hero under it
+    /// read ¥433 -- both figures on screen at once. The scoped payload was a
+    /// snapshot from hours earlier, and the zero-only contract waved it through
+    /// because it was not zero, merely 14% of the truth.
+    @Test("a scoped payload holding a fraction of the tab's spend is stale")
+    func scopedPayloadFarBelowTheAllSliceIsStale() {
+        let store = AppStore()
+        let all = menubarPayload(
+            cost: 505,
+            providers: ["hermes agent": 496],
+            providerDetails: [
+                ProviderDetail(id: "hermes", label: "Hermes Agent", cost: 496, calls: 1589, hasUsage: true),
+            ]
+        )
+        let hoursOld = menubarPayload(
+            cost: 64.57,
+            calls: 115,
+            sessions: 6,
+            providers: ["hermes agent": 64.57],
+            providerDetails: [
+                ProviderDetail(id: "hermes", label: "Hermes Agent", cost: 64.57, calls: 115, hasUsage: true),
+            ]
+        )
+
+        store.setCachedPayloadForTesting(all, period: .today, provider: .all, fetchedAt: Date())
+        store.suppressRefreshesForTesting()
+        store.switchTo(provider: .hermes)
+        store.setCachedPayloadForTesting(hoursOld, period: .today, provider: .hermes, fetchedAt: Date())
+
+        #expect(store.providerPayloadContradictsAllForTesting(hoursOld, period: .today, provider: .hermes))
+        // Nothing is printed under the tab until the real figure lands.
+        #expect(!store.hasCachedData)
+        #expect(store.needsInteractivePayloadRefresh)
+    }
+
+    /// The counterweight: these are two CLI runs seconds apart against a corpus
+    /// that is still being written to, so the scoped slice legitimately trails
+    /// the all-provider one. Measured drift on a live machine was 1499 vs 1589
+    /// calls -- rejecting that would blank the popover on every refresh.
+    @Test("ordinary drift between the two slices is not stale")
+    func ordinaryDriftBetweenSlicesIsAccepted() {
+        let store = AppStore()
+        let all = menubarPayload(
+            cost: 509.50,
+            providers: ["hermes agent": 509.50],
+            providerDetails: [
+                ProviderDetail(id: "hermes", label: "Hermes Agent", cost: 509.50, calls: 1589, hasUsage: true),
+            ]
+        )
+        let slightlyBehind = menubarPayload(
+            cost: 494.59,
+            calls: 1499,
+            sessions: 16,
+            providers: ["hermes agent": 494.59],
+            providerDetails: [
+                ProviderDetail(id: "hermes", label: "Hermes Agent", cost: 494.59, calls: 1499, hasUsage: true),
+            ]
+        )
+
+        store.setCachedPayloadForTesting(all, period: .today, provider: .all, fetchedAt: Date())
+
+        #expect(!store.providerPayloadContradictsAllForTesting(slightlyBehind, period: .today, provider: .hermes))
+    }
+
     @Test("flat-rate activity rejects a contradictory scoped zero")
     func flatRateActivityRejectsScopedZero() {
         let store = AppStore()

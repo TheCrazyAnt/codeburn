@@ -52,11 +52,17 @@ struct HeroSection: View {
                     }
                     // Token usage is the other half of the headline question
                     // ("what did I spend, and on how much?"), so it stays
-                    // visible whichever metric drives the big number.
-                    Text(L("\(formatTokens(Double(totals.totalTokens))) tokens"))
+                    // visible whichever metric drives the big number. Cache
+                    // reads are included because that is what the CLI's own
+                    // `Tokens` figure counts, and leaving them out understates
+                    // a real corpus by ~100x -- which reads as a broken number
+                    // next to any other usage tool. The split lives in the
+                    // tooltip so the headline stays one figure.
+                    Text(L("\(formatTokens(Double(totals.throughputTokens))) tokens"))
                         .font(.system(size: 10.5))
                         .monospacedDigit()
                         .foregroundStyle(.tertiary)
+                        .help(tokenBreakdown)
                 }
             }
 
@@ -98,6 +104,15 @@ struct HeroSection: View {
         .padding(.horizontal, 14)
         .padding(.top, 10)
         .padding(.bottom, 12)
+    }
+
+    /// Reads as "new 212.5M (in 108.9M · out 104.2M) · cache 32.1B (read 31.3B · write 835.1M)".
+    private var tokenBreakdown: String {
+        let new = L("new \(formatTokens(Double(totals.totalTokens)))")
+        let split = L("in \(formatTokens(Double(totals.inputTokens))) · out \(formatTokens(Double(totals.outputTokens)))")
+        let cache = L("cache \(formatTokens(Double(totals.cacheReadTokens + totals.cacheWriteTokens)))")
+        let cacheSplit = L("read \(formatTokens(Double(totals.cacheReadTokens))) · write \(formatTokens(Double(totals.cacheWriteTokens)))")
+        return "\(new) (\(split)) · \(cache) (\(cacheSplit))"
     }
 
     private var heroText: String {
@@ -193,14 +208,34 @@ struct HeroTotals: Equatable {
     let inputTokens: Int
     let outputTokens: Int
     let totalTokens: Int
+    let cacheReadTokens: Int
+    let cacheWriteTokens: Int
 
-    init(cost: Double, calls: Int, sessions: Int, inputTokens: Int, outputTokens: Int, totalTokens: Int) {
+    /// Every token the period moved, cache included -- the CLI's own `Tokens`
+    /// figure (`usage-aggregator.ts`) and what the leaderboard reports. Cache
+    /// reads dominate it by two orders of magnitude on a real corpus, which is
+    /// exactly why `totalTokens` (new tokens only) stays a separate number:
+    /// one answers "what did I pay for", this one answers "how much did I move".
+    var throughputTokens: Int { totalTokens + cacheReadTokens + cacheWriteTokens }
+
+    init(
+        cost: Double,
+        calls: Int,
+        sessions: Int,
+        inputTokens: Int,
+        outputTokens: Int,
+        totalTokens: Int,
+        cacheReadTokens: Int = 0,
+        cacheWriteTokens: Int = 0
+    ) {
         self.cost = cost
         self.calls = calls
         self.sessions = sessions
         self.inputTokens = inputTokens
         self.outputTokens = outputTokens
         self.totalTokens = totalTokens
+        self.cacheReadTokens = cacheReadTokens
+        self.cacheWriteTokens = cacheWriteTokens
     }
 
     init(payload: MenubarPayload, activeScope: MenubarScope) {
@@ -211,7 +246,9 @@ struct HeroTotals: Equatable {
                 sessions: combined.sessions,
                 inputTokens: combined.inputTokens,
                 outputTokens: combined.outputTokens,
-                totalTokens: combined.inputTokens + combined.outputTokens
+                totalTokens: combined.inputTokens + combined.outputTokens,
+                cacheReadTokens: combined.cacheReadTokens,
+                cacheWriteTokens: combined.cacheCreateTokens
             )
             return
         }
@@ -223,7 +260,9 @@ struct HeroTotals: Equatable {
             sessions: current.sessions,
             inputTokens: current.inputTokens,
             outputTokens: current.outputTokens,
-            totalTokens: current.inputTokens + current.outputTokens
+            totalTokens: current.inputTokens + current.outputTokens,
+            cacheReadTokens: current.cacheReadTokens,
+            cacheWriteTokens: current.cacheWriteTokens
         )
     }
 }
