@@ -50,6 +50,13 @@ struct HeroSection: View {
                             .monospacedDigit()
                             .foregroundStyle(.tertiary)
                     }
+                    // Token usage is the other half of the headline question
+                    // ("what did I spend, and on how much?"), so it stays
+                    // visible whichever metric drives the big number.
+                    Text(L("\(formatTokens(Double(totals.totalTokens))) tokens"))
+                        .font(.system(size: 10.5))
+                        .monospacedDigit()
+                        .foregroundStyle(.tertiary)
                 }
             }
 
