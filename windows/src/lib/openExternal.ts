@@ -1,12 +1,23 @@
 import { invoke } from '@tauri-apps/api/core'
 import { openUrl } from '@tauri-apps/plugin-opener'
 
-/// Opens a link in the system browser. The plugin call is the normal path, but
-/// it goes through the capability layer and rejects rather than opens when that
-/// refuses -- invisible if the promise is discarded, which is how "Open GitHub"
-/// came to do nothing and say nothing. The Rust command is the same opener
-/// without the gate. Either way the caller gets a rejection to show, not silence.
+import { IS_WINDOWS } from './platform'
+
+/// Opens a link in the system browser and rejects with a reason when it could
+/// not -- never silence, which is how "Open GitHub" came to do nothing and say
+/// nothing.
+///
+/// On Windows only the Rust command is used. The plugin's own command runs on
+/// a worker thread with no COM apartment, where ShellExecute can report success
+/// and launch nothing; the Rust path calls it on the main thread and returns a
+/// real verdict, and falling back to the plugin after a real failure would only
+/// let that false success hide it again. Elsewhere the plugin is sound and
+/// stays first, with the Rust command behind it.
 export async function openExternal(url: string): Promise<void> {
+  if (IS_WINDOWS) {
+    await invoke('open_url', { url })
+    return
+  }
   try {
     await openUrl(url)
   } catch (first) {

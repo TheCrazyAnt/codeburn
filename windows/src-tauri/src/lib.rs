@@ -210,6 +210,47 @@ fn apply_language(_app: &AppHandle, language: i18n::Language) -> tauri::Result<(
     Ok(())
 }
 
+/// `ShellExecuteW("open", url)` on the calling thread, with its return value
+/// turned into a reason. Must be called from a thread that has COM initialised
+/// -- the main thread, which is where a sync Tauri command runs.
+#[cfg(windows)]
+fn shell_open_windows(url: &str) -> Result<(), String> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::UI::Shell::{
+        ShellExecuteW, SE_ERR_ACCESSDENIED, SE_ERR_ASSOCINCOMPLETE, SE_ERR_FNF, SE_ERR_NOASSOC,
+    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+    let wide = |s: &str| -> Vec<u16> {
+        std::ffi::OsStr::new(s).encode_wide().chain(std::iter::once(0)).collect()
+    };
+    let verb = wide("open");
+    let target = wide(url);
+    // SAFETY: both buffers are NUL-terminated and outlive the call; the other
+    // pointer arguments are documented as optional and passed null.
+    let code = unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            verb.as_ptr(),
+            target.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            SW_SHOWNORMAL,
+        )
+    } as isize;
+    if code > 32 {
+        return Ok(());
+    }
+    let why = match code as u32 {
+        SE_ERR_NOASSOC => "no application is associated with https:// links -- set a default browser in Windows Settings",
+        SE_ERR_ASSOCINCOMPLETE => "the https:// association is incomplete or invalid",
+        SE_ERR_ACCESSDENIED => "Windows denied access",
+        SE_ERR_FNF => "the browser the association points at was not found",
+        _ => "ShellExecute failed",
+    };
+    Err(format!("{why} (ShellExecute code {code})"))
+}
+
 #[cfg(not(target_os = "linux"))]
 const BLANK_ICON_SIZE: u32 = 16;
 
@@ -437,18 +478,32 @@ mod commands {
             .map_err(|e| e.to_string())
     }
 
-    /// Opens a web link in the default browser from the Rust side. The webview's
-    /// own `openUrl` (plugin-opener) goes through the capability layer and, when
-    /// that refuses, rejects a promise the caller had been discarding -- so the
-    /// button did nothing and said nothing. This is the same opener without the
-    /// gate; the scheme check is the one part of the gate worth keeping.
+    /// Opens a web link in the default browser from the Rust side.
+    ///
+    /// On Windows this calls `ShellExecuteW` itself instead of going through the
+    /// opener plugin. The plugin's command is `async`, so it runs on a tokio
+    /// worker with no COM apartment, and `ShellExecuteEx` hands protocol
+    /// handlers off through COM -- in that state it can report success and
+    /// launch nothing, which is exactly what "Open GitHub" did on a test
+    /// machine: no browser, no error. A sync command runs on the main thread,
+    /// where the webview has COM initialised, and `ShellExecuteW`'s return
+    /// value is a real verdict (a code at or below 32 names the failure) rather
+    /// than a promise that resolved.
     #[tauri::command]
     pub fn open_url(url: String, app: AppHandle) -> Result<(), String> {
-        use tauri_plugin_opener::OpenerExt;
         if !(url.starts_with("https://") || url.starts_with("http://")) {
             return Err(format!("refusing to open a non-web URL: {url}"));
         }
-        app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
+        #[cfg(windows)]
+        {
+            let _ = &app;
+            crate::shell_open_windows(&url)
+        }
+        #[cfg(not(windows))]
+        {
+            use tauri_plugin_opener::OpenerExt;
+            app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
+        }
     }
 
     /// Mirrors the Settings language picker onto the Rust side. `system` hands the
