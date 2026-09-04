@@ -1446,3 +1446,137 @@ code { font-family: var(--font-mono); }
   color: var(--tooltip-fg-2);
 }
 .error-toast-close:hover { background: rgba(127, 127, 127, 0.2); }
+
+/* ---- scope strip (Local / Combined), under the period strip like the mac ------ */
+
+.scope-wrap {
+  padding: 0 12px 10px;
+  border-bottom: 1px solid var(--separator-soft);
+}
+.period-wrap { position: relative; border-bottom: 0; }
+
+/* The calendar button shares the period track; fixed width so six labels keep their room. */
+.period-cal {
+  flex: 0 0 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--label-2);
+}
+.period-cal-on, .period-cal-on:hover { color: var(--brand-accent); }
+
+/* ---- day picker popover (port of the mac CalendarPopover) --------------------- */
+
+.calpop {
+  position: absolute;
+  right: 12px;
+  top: calc(100% - 4px);
+  width: 234px;
+  padding: 10px 6px 10px;
+  border-radius: 8px;
+  background: var(--menu-bg);
+  box-shadow: var(--menu-shadow), inset 0 0 0 0.5px var(--separator);
+  z-index: 100;
+  animation: menuIn 120ms var(--ease-ui);
+}
+.calpop-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px 6px;
+}
+.calpop-month { font-size: 12px; font-weight: 600; color: var(--label); }
+.calpop-nav {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--label-2);
+}
+.calpop-nav:hover:not(:disabled) { background: var(--fill-08); color: var(--label); }
+.calpop-nav:disabled { color: var(--label-3); opacity: 0.4; }
+.calpop-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 30px);
+  justify-content: center;
+  padding-bottom: 2px;
+}
+.calpop-weekdays span {
+  font-size: 9px;
+  font-weight: 500;
+  color: var(--label-3);
+  text-align: center;
+  line-height: 16px;
+}
+.calpop-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 30px);
+  justify-content: center;
+  row-gap: 2px;
+}
+.calpop-day {
+  width: 28px;
+  height: 28px;
+  margin: 0 1px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  font-size: 11px;
+  color: var(--label);
+  font-variant-numeric: tabular-nums;
+}
+.calpop-day:hover:not(:disabled) { background: var(--fill-08); }
+.calpop-day-other { color: var(--label-3); opacity: 0.6; }
+.calpop-day-today { color: var(--brand-accent); font-weight: 700; box-shadow: inset 0 0 0 1px rgba(201, 82, 29, 0.5); }
+.calpop-day-selected, .calpop-day-selected:hover:not(:disabled) { background: var(--brand-accent); color: #fff; box-shadow: none; }
+.calpop-day-future { color: var(--label-3); opacity: 0.3; }
+.calpop-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 4px 0;
+}
+.calpop-clear { border: 0; background: transparent; font-size: 11px; font-weight: 500; color: var(--label-2); }
+.calpop-clear:hover { color: var(--label); }
+.calpop-summary { flex: 1; text-align: center; font-size: 10px; color: var(--label-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.calpop-done { padding: 5px 14px; }
+.calpop-done-muted { opacity: 0.55; }
+
+/* ---- combined-scope device split under the hero -------------------------------- */
+
+.hero-note {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--label-2);
+}
+.hero-devices { margin-top: 8px; }
+.hero-devices-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--label-2);
+  margin-bottom: 5px;
+}
+.hero-devices-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.hero-device { display: flex; align-items: center; gap: 6px; font-size: 10.5px; }
+.hero-device-dot { width: 10px; text-align: center; color: var(--label-3); font-size: 8px; }
+.hero-device-error .hero-device-dot { color: var(--brand-accent); }
+.hero-device-name { font-weight: 500; color: var(--label); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hero-device-cost { margin-left: auto; color: var(--label-2); font-variant-numeric: tabular-nums; }
+.hero-device-tokens { font-size: 10px; color: var(--label-3); font-variant-numeric: tabular-nums; }
+
+/* ---- a failed link open is said, not swallowed --------------------------------- */
+
+.settings-error, .lb-join-error { color: var(--brand-accent); }
+.lb-join-error { font-size: 10.5px; margin-bottom: 4px; }

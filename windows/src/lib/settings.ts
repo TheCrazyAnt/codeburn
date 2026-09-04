@@ -13,6 +13,9 @@ const KEYS = {
   /// openings the way macOS remembers them in UserDefaults.
   leaderboardBoard: 'codeburn.leaderboardBoard',
   leaderboardMetric: 'codeburn.leaderboardMetric',
+  /// 'combined' when the user last chose every paired device; absent means local.
+  /// The mac keeps the same choice in UserDefaults (`CodeBurnMenubarScope`).
+  scope: 'codeburn.scope',
 } as const
 
 type Key = keyof typeof KEYS

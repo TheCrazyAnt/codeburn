@@ -138,32 +138,20 @@ impl CodeburnCli {
         status
     }
 
-    /// Spawns `codeburn status --format menubar-json --period X --provider Y` and decodes the
-    /// output. Pipes are drained concurrently so a chatty stderr cannot deadlock stdout.
+    /// Spawns `codeburn status --format menubar-json …` for one popover selection and
+    /// decodes the output. Pipes are drained concurrently so a chatty stderr cannot
+    /// deadlock stdout.
     pub async fn fetch_menubar_payload(
         &self,
         period: &str,
         provider: &str,
+        scope: Option<&str>,
+        days: Option<&str>,
         include_optimize: bool,
     ) -> Result<Value> {
-        if !is_safe_arg(period) || !is_safe_arg(provider) {
-            bail!("invalid period/provider argument");
-        }
-
-        let mut args = vec![
-            "status",
-            "--format",
-            "menubar-json",
-            "--period",
-            period,
-            "--provider",
-            provider,
-        ];
-        if !include_optimize {
-            args.push("--no-optimize");
-        }
-
-        let stdout = self.run_capture(&args, FETCH_TIMEOUT_SECS).await?;
+        let args = menubar_args(period, provider, scope, days, include_optimize)?;
+        let argv: Vec<&str> = args.iter().map(String::as_str).collect();
+        let stdout = self.run_capture(&argv, FETCH_TIMEOUT_SECS).await?;
         let payload: Value =
             serde_json::from_str(&stdout).with_context(|| "CLI returned invalid JSON")?;
         Ok(payload)
@@ -301,6 +289,67 @@ pub fn parse_version(text: &str) -> Option<(u32, u32, u32)> {
             .ok()
     });
     Some((parts.next()??, parts.next()??, parts.next().flatten().unwrap_or(0)))
+}
+
+/// Assembles the argv for one popover selection. A day selection replaces the
+/// period (the CLI treats `--days` as overriding `--period`), and combined scope
+/// asks the CLI to merge every paired device. Pulled out of the spawn so the
+/// combinations the CLI rejects -- combined with a provider filter, or with a
+/// day selection -- are refused here with a readable reason instead of a stderr
+/// line the popover would surface as a generic failure.
+fn menubar_args(
+    period: &str,
+    provider: &str,
+    scope: Option<&str>,
+    days: Option<&str>,
+    include_optimize: bool,
+) -> Result<Vec<String>> {
+    if !is_safe_arg(period) || !is_safe_arg(provider) {
+        bail!("invalid period/provider argument");
+    }
+    let days = days.filter(|d| !d.is_empty());
+    if let Some(d) = days {
+        if !is_days_arg(d) {
+            bail!("invalid day selection");
+        }
+    }
+    let combined = scope == Some("combined");
+    if combined && provider != "all" {
+        bail!("combined scope reports every provider; switch the provider tab to All");
+    }
+    if combined && days.is_some() {
+        bail!("combined scope cannot be narrowed to single days");
+    }
+
+    let mut args: Vec<String> = ["status", "--format", "menubar-json"]
+        .into_iter()
+        .map(String::from)
+        .collect();
+    match days {
+        Some(d) => args.extend(["--days".into(), d.into()]),
+        None => args.extend(["--period".into(), period.into()]),
+    }
+    args.extend(["--provider".into(), provider.into()]);
+    if combined {
+        args.extend(["--scope".into(), "combined".into()]);
+    }
+    if !include_optimize {
+        args.push("--no-optimize".into());
+    }
+    Ok(args)
+}
+
+/// `--days` is a comma-separated list of `YYYY-MM-DD`. Commas are outside
+/// `is_safe_arg`'s allowlist on purpose, so this is the one shape they are
+/// accepted in.
+fn is_days_arg(value: &str) -> bool {
+    !value.is_empty()
+        && value.split(',').all(|day| {
+            day.len() == 10
+                && day.bytes().enumerate().all(|(i, c)| {
+                    if i == 4 || i == 7 { c == b'-' } else { c.is_ascii_digit() }
+                })
+        })
 }
 
 /// The `codeburn` shim resolves `node` through PATH, so whichever interpreter comes
@@ -624,6 +673,33 @@ mod which {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn menubar_args_follow_the_selection() {
+        let argv = menubar_args("month", "claude", Some("local"), None, true).unwrap();
+        assert_eq!(argv, ["status", "--format", "menubar-json", "--period", "month", "--provider", "claude"]);
+
+        // A day selection overrides the period; the period is not sent at all.
+        let argv = menubar_args("month", "all", None, Some("2026-09-01,2026-09-03"), false).unwrap();
+        assert_eq!(
+            argv,
+            ["status", "--format", "menubar-json", "--days", "2026-09-01,2026-09-03", "--provider", "all", "--no-optimize"]
+        );
+
+        let argv = menubar_args("today", "all", Some("combined"), None, true).unwrap();
+        assert!(argv.windows(2).any(|w| w == ["--scope", "combined"]));
+    }
+
+    /// The CLI rejects these with an error on stderr; refusing them here keeps the
+    /// popover from spawning a process just to be told no.
+    #[test]
+    fn menubar_args_refuse_what_the_cli_would() {
+        assert!(menubar_args("today", "claude", Some("combined"), None, true).is_err());
+        assert!(menubar_args("today", "all", Some("combined"), Some("2026-09-01"), true).is_err());
+        assert!(menubar_args("today", "all", None, Some("2026-9-1"), true).is_err());
+        assert!(menubar_args("today", "all", None, Some("2026-09-01;rm"), true).is_err());
+        assert!(menubar_args("today; rm", "all", None, None, true).is_err());
+    }
 
     /// Regression guard for the Node-version trap: the CLI shim resolves `node`
     /// through PATH, so a version manager's default could shadow the interpreter

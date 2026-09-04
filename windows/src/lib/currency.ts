@@ -2,6 +2,8 @@
 /// The Rust backend hands us { code, symbol, rate } so the frontend stays dumb about FX --
 /// it just multiplies and renders.
 
+import { t } from './i18n'
+
 export type CurrencyState = {
   code: string
   symbol: string
@@ -10,10 +12,45 @@ export type CurrencyState = {
 
 export const USD: CurrencyState = { code: 'USD', symbol: '$', rate: 1 }
 
+/// Same nineteen as the macOS `SupportedCurrency`, in the same order. CNY was
+/// missing from this list for a while, which on a Chinese-language build read as
+/// the picker being untranslated rather than as a currency being absent.
 export const CURRENCY_CODES = [
-  'USD', 'GBP', 'EUR', 'AUD', 'CAD', 'NZD', 'JPY', 'CHF', 'INR',
-  'BRL', 'SEK', 'SGD', 'HKD', 'KRW', 'MXN', 'ZAR', 'DKK',
+  'USD', 'GBP', 'EUR', 'AUD', 'CAD', 'NZD', 'JPY', 'CNY', 'CHF', 'INR',
+  'BRL', 'SEK', 'SGD', 'HKD', 'KRW', 'MXN', 'ZAR', 'DKK', 'RON',
 ] as const
+
+export type CurrencyCode = (typeof CURRENCY_CODES)[number]
+
+/// English names double as translation keys, matching the macOS catalog so both
+/// apps read the same in every language.
+const CURRENCY_NAMES: Record<CurrencyCode, string> = {
+  USD: 'US Dollar',
+  GBP: 'British Pound',
+  EUR: 'Euro',
+  AUD: 'Australian Dollar',
+  CAD: 'Canadian Dollar',
+  NZD: 'New Zealand Dollar',
+  JPY: 'Japanese Yen',
+  CNY: 'Chinese Yuan',
+  CHF: 'Swiss Franc',
+  INR: 'Indian Rupee',
+  BRL: 'Brazilian Real',
+  SEK: 'Swedish Krona',
+  SGD: 'Singapore Dollar',
+  HKD: 'Hong Kong Dollar',
+  KRW: 'South Korean Won',
+  MXN: 'Mexican Peso',
+  ZAR: 'South African Rand',
+  DKK: 'Danish Krone',
+  RON: 'Romanian Leu',
+}
+
+/// "人民币 (CNY)" -- the macOS menu's exact shape, so a picker item reads the same
+/// on both apps.
+export function currencyLabel(code: CurrencyCode): string {
+  return `${t(CURRENCY_NAMES[code])} (${code})`
+}
 
 const SUB_CENT = 0.005
 

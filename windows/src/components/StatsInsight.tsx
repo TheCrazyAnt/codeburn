@@ -19,7 +19,8 @@ function periodSuffix(period: Period): string {
     case 'week': return t('(7 days)')
     case '30days': return t('(30 days)')
     case 'month': return t('(month)')
-    case 'all': return t('(all time)')
+    case 'all': return t('(6 months)')
+    case 'lifetime': return t('(all time)')
   }
 }
 

@@ -116,6 +116,7 @@ pub fn run() {
             commands::leaderboard_login,
             commands::leaderboard_login_cancel,
             commands::set_language,
+            commands::open_url,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
@@ -425,13 +426,29 @@ mod commands {
     pub async fn fetch_payload(
         period: String,
         provider: String,
+        scope: Option<String>,
+        days: Option<String>,
         include_optimize: bool,
         state: State<'_, AppState>,
     ) -> Result<Value, String> {
         let cli = state.cli.lock().map_err(|e| e.to_string())?.clone();
-        cli.fetch_menubar_payload(&period, &provider, include_optimize)
+        cli.fetch_menubar_payload(&period, &provider, scope.as_deref(), days.as_deref(), include_optimize)
             .await
             .map_err(|e| e.to_string())
+    }
+
+    /// Opens a web link in the default browser from the Rust side. The webview's
+    /// own `openUrl` (plugin-opener) goes through the capability layer and, when
+    /// that refuses, rejects a promise the caller had been discarding -- so the
+    /// button did nothing and said nothing. This is the same opener without the
+    /// gate; the scheme check is the one part of the gate worth keeping.
+    #[tauri::command]
+    pub fn open_url(url: String, app: AppHandle) -> Result<(), String> {
+        use tauri_plugin_opener::OpenerExt;
+        if !(url.starts_with("https://") || url.starts_with("http://")) {
+            return Err(format!("refusing to open a non-web URL: {url}"));
+        }
+        app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
     }
 
     /// Mirrors the Settings language picker onto the Rust side. `system` hands the

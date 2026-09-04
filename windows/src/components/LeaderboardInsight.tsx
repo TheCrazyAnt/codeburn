@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { openUrl } from '@tauri-apps/plugin-opener'
+import { openExternal } from '../lib/openExternal'
 
 import type { CurrencyState } from '../lib/currency'
 import { t } from '../lib/i18n'
@@ -185,6 +185,7 @@ function Row({ entry, metric, currency, isMe }: {
 function JoinCard({ leaderboard }: { leaderboard: LeaderboardController }) {
   const { account, signIn, busy, beginSignIn, abortSignIn, setSharing } = leaderboard
   const [copied, setCopied] = useState(false)
+  const [openError, setOpenError] = useState<string | null>(null)
 
   if (signIn.phase === 'starting') {
     return (
@@ -206,7 +207,14 @@ function JoinCard({ leaderboard }: { leaderboard: LeaderboardController }) {
         <div className="lb-code-row">
           <span className="lb-code">{signIn.userCode}</span>
           <div className="lb-code-actions">
-            <button type="button" className="btn btn-prominent" onClick={() => { void openUrl(uri) }}>
+            <button
+              type="button"
+              className="btn btn-prominent"
+              onClick={() => {
+                setOpenError(null)
+                void openExternal(uri).catch(err => setOpenError(t('Could not open the browser: %s', String(err))))
+              }}
+            >
               {t('Open GitHub')}
             </button>
             <button
@@ -228,6 +236,7 @@ function JoinCard({ leaderboard }: { leaderboard: LeaderboardController }) {
           <span className="lb-toolbar-spacer" />
           <button type="button" className="btn" onClick={() => { void abortSignIn() }}>{t('Cancel')}</button>
         </div>
+        {openError && <div className="lb-join-error" role="alert">{openError}</div>}
         <div className="lb-join-url">{uri}</div>
       </div>
     )

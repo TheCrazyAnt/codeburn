@@ -1,5 +1,5 @@
 import type { CurrencyState } from '../lib/currency'
-import { CURRENCY_CODES } from '../lib/currency'
+import { CURRENCY_CODES, currencyLabel } from '../lib/currency'
 import { TRAY_BADGE_SUPPORTED } from '../lib/platform'
 import { t } from '../lib/i18n'
 import { DropMenu } from './DropMenu'
@@ -31,8 +31,8 @@ export function FooterBar({
       <DropMenu
         title={t('Currency')}
         label={<><CoinIcon size={12} /><span>{currency.code}</span></>}
-        items={CURRENCY_CODES.map(c => ({ id: c, label: c, checked: c === currency.code }))}
-        columns={3}
+        items={CURRENCY_CODES.map(c => ({ id: c, label: currencyLabel(c), checked: c === currency.code }))}
+        columns={2}
         onSelect={onCurrency}
       />
       <button

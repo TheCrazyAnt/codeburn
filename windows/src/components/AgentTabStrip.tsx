@@ -71,7 +71,9 @@ export function AgentTabStrip({ selected, onSelect, payload, currency }: Props) 
   return (
     <div className="agent-tabs-wrap" onMouseLeave={() => setHovered(null)}>
       <nav className="agent-tabs" aria-label={t('Provider')} ref={scroller} onWheel={onWheel}>
-        {ALL_PROVIDERS.map(p => {
+        {/* Only tools that have written a session get a tab, as on the mac; the
+            strip itself is hidden by the caller when there are none. */}
+        {ALL_PROVIDERS.filter(p => p.id === 'all' || providers.includes(p.id)).map(p => {
           const detected = p.id === 'all' ? providers.length > 0 : providers.includes(p.id)
           const cost = p.id === 'all' ? total : (costs[p.id] ?? 0)
           const active = selected === p.id

@@ -1,8 +1,8 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { invoke } from '@tauri-apps/api/core'
-import { openUrl } from '@tauri-apps/plugin-opener'
+import { openExternal } from '../lib/openExternal'
 import type { CurrencyState } from '../lib/currency'
-import { CURRENCY_CODES } from '../lib/currency'
+import { CURRENCY_CODES, currencyLabel } from '../lib/currency'
 import { homePath, TRAY_BADGE_SUPPORTED } from '../lib/platform'
 import { t, type LanguageChoice } from '../lib/i18n'
 import { LEADERBOARD_BOARDS, boardLabel, isParticipating, rankText } from '../lib/leaderboard'
@@ -46,6 +46,7 @@ export function SettingsPanel({
 }: Props) {
   const [loginItem, setLoginItem] = useState<boolean | null>(null)
   const [loginError, setLoginError] = useState<string | null>(null)
+  const [openError, setOpenError] = useState<string | null>(null)
 
   // No CLI probe here: App owns the gate and probes it on mount, so the panel only ever
   // displays what that probe found. Its own probe could otherwise fail transiently and drop
@@ -124,7 +125,7 @@ export function SettingsPanel({
         <Row label={t('Currency')} hint={t('Shared with the CLI via %s.', homePath('.config', 'codeburn', 'config.json'))}>
           <DropMenu
             label={<><span>{currency.code}</span><ChevronDown size={10} /></>}
-            items={CURRENCY_CODES.map(c => ({ id: c, label: c, checked: c === currency.code }))}
+            items={CURRENCY_CODES.map(c => ({ id: c, label: currencyLabel(c), checked: c === currency.code }))}
             columns={3}
             align="right"
             onSelect={onCurrency}
@@ -151,11 +152,12 @@ export function SettingsPanel({
       <div className="settings-group">
         <div className="settings-group-label">{t('About')}</div>
         <Row label={`CodeBurn Desktop ${version ? `v${version}` : ''}`} hint={t('Tracks AI coding spend from local session logs. Nothing leaves this machine except the Claude usage check.')}>
-          <button type="button" className="btn" onClick={() => openUrl(GITHUB_URL)}>GitHub</button>
+          <button type="button" className="btn" onClick={() => { void openExternal(GITHUB_URL).catch(err => setOpenError(String(err))) }}>GitHub</button>
         </Row>
         <Row label={t('Simplified Chinese build')} hint={t('Based on getagentseal/codeburn by Resham Joshi (iamtoruk) · AgentSeal. MIT License.')}>
-          <button type="button" className="btn" onClick={() => openUrl(UPSTREAM_URL)}>{t('Upstream')}</button>
+          <button type="button" className="btn" onClick={() => { void openExternal(UPSTREAM_URL).catch(err => setOpenError(String(err))) }}>{t('Upstream')}</button>
         </Row>
+        {openError && <div className="settings-row-hint settings-error" role="alert">{t('Could not open the browser: %s', openError)}</div>}
         <Row label={t('Quit CodeBurn')} hint={t('Removes the tray icon until you launch it again.')}>
           <button type="button" className="btn" onClick={onQuit}>{t('Quit')}</button>
         </Row>
@@ -182,6 +184,7 @@ function LeaderboardSettings({ leaderboard }: { leaderboard: LeaderboardControll
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [confirmSignOut, setConfirmSignOut] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [openError, setOpenError] = useState<string | null>(null)
 
   // The three ranks are three cheap board reads; only worth doing once the
   // panel is open and there is a session to be ranked under.
@@ -244,7 +247,11 @@ function LeaderboardSettings({ leaderboard }: { leaderboard: LeaderboardControll
               <button
                 type="button"
                 className="btn btn-prominent"
-                onClick={() => { void openUrl(signIn.verificationUri ?? 'https://github.com/login/device') }}
+                onClick={() => {
+                  setOpenError(null)
+                  void openExternal(signIn.verificationUri ?? 'https://github.com/login/device')
+                    .catch(err => setOpenError(t('Could not open the browser: %s', String(err))))
+                }}
               >
                 {t('Open GitHub')}
               </button>
@@ -263,6 +270,7 @@ function LeaderboardSettings({ leaderboard }: { leaderboard: LeaderboardControll
             </div>
           </div>
           <div className="settings-row-hint">{t('Waiting for you to authorize in the browser…')}</div>
+          {openError && <div className="settings-row-hint settings-error" role="alert">{openError}</div>}
           <div className="settings-signin-actions">
             <button type="button" className="btn" onClick={() => { void leaderboard.abortSignIn() }}>{t('Cancel')}</button>
           </div>

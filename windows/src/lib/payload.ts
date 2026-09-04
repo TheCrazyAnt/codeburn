@@ -1,7 +1,44 @@
 /// Shape of the JSON returned by `codeburn status --format menubar-json`. Kept in sync with
 /// `src/menubar-json.ts` (CLI) and `mac/Sources/CodeBurnMenubar/Data/MenubarPayload.swift`
 /// (macOS app). Any field change there must land here too or the frontend silently drops it.
+/// One paired device's share of a combined-scope payload. `error` is set for a
+/// device that could not be reached; its totals are then whatever the CLI last
+/// knew and must be labelled as such.
+export type CombinedDeviceUsage = {
+  id: string
+  name: string
+  local: boolean
+  error: string | null
+  cost: number
+  calls: number
+  sessions: number
+  inputTokens: number
+  outputTokens: number
+  cacheCreateTokens: number
+  cacheReadTokens: number
+  totalTokens: number
+}
+
+export type CombinedUsage = {
+  perDevice: CombinedDeviceUsage[]
+  combined: {
+    cost: number
+    calls: number
+    sessions: number
+    inputTokens: number
+    outputTokens: number
+    cacheCreateTokens: number
+    cacheReadTokens: number
+    totalTokens: number
+    deviceCount: number
+    reachableCount: number
+  }
+}
+
 export type MenubarPayload = {
+  /// Present only for `--scope combined`: every paired device merged, plus the
+  /// per-device split the hero shows under the amount.
+  combined?: CombinedUsage | null
   generated: string
   /// UI language the CLI resolved (`codeburn lang`). Absent on older CLIs, in
   /// which case the popover falls back to the webview locale.

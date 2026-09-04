@@ -35,11 +35,28 @@ import { StarBanner } from './components/StarBanner'
 import { HeroSection } from './components/HeroSection'
 import { PeriodTabs, periodLabel } from './components/PeriodTabs'
 import type { Period } from './components/PeriodTabs'
+import { ScopeTabs, isScope, type Scope } from './components/ScopeTabs'
 import { FooterBar } from './components/FooterBar'
 import { ErrorToast } from './components/ErrorToast'
 import { SettingsPanel, type ThemeChoice } from './components/SettingsPanel'
 
 const payloadCache = new PayloadCache<MenubarPayload>()
+
+/// Everything that decides which CLI query backs the popover.
+type Selection = { period: Period; provider: Provider; scope: Scope; days: string[] }
+
+/// Cache key for one selection. A day pick takes the period's slot because the
+/// CLI treats `--days` as overriding `--period` -- the period is not sent at all.
+function selectionKey(s: Selection): string {
+  const when = s.days.length > 0 ? `days:${s.days.join(',')}` : s.period
+  return `${when}:${s.provider}:${s.scope}`
+}
+
+/// Today across every provider on this machine: what the tray badge, the
+/// tooltip and the provider strip read, refreshed even while the popover is
+/// hidden.
+const TODAY_ALL: Selection = { period: 'today', provider: 'all', scope: 'local', days: [] }
+const TODAY_ALL_KEY = selectionKey(TODAY_ALL)
 
 /// Background cadence, mirroring mac/Sources/CodeBurnMenubar/RefreshCadence.swift: every
 /// fetch is a full Node process, so the popover being closed has to cost less than it being
@@ -59,6 +76,12 @@ type FetchOptions = {
 export function App() {
   const [period, setPeriod] = useState<Period>('today')
   const [provider, setProvider] = useState<Provider>('all')
+  const [scope, setScope] = useState<Scope>(() => {
+    const saved = readSetting('scope')
+    return isScope(saved) ? saved : 'local'
+  })
+  const [selectedDays, setSelectedDays] = useState<string[]>([])
+  const [combinedUnavailable, setCombinedUnavailable] = useState(false)
   const [payload, setPayload] = useState<MenubarPayload | null>(null)
   const [todayPayload, setTodayPayload] = useState<MenubarPayload | null>(null)
   const [currency, setCurrency] = useState<CurrencyState>(USD)
@@ -94,33 +117,56 @@ export function App() {
   /// board and the account can never disagree about who is signed in.
   const leaderboard = useLeaderboard()
 
-  const selection = useRef({ period, provider })
-  selection.current = { period, provider }
+  // The scope the query actually runs under. Combined reports every provider
+  // unfiltered and cannot be narrowed to days -- the CLI refuses both -- so a
+  // provider tab or a day pick views this machine, while the user's preference
+  // survives for when they return to All. Same call the mac makes in
+  // `effectiveSelectedScope`.
+  const effectiveScope: Scope = selectedDays.length > 0 || provider !== 'all' ? 'local' : scope
+  const current: Selection = { period, provider, scope: effectiveScope, days: selectedDays }
+  const currentKey = selectionKey(current)
+  const selection = useRef(current)
+  selection.current = current
 
-  const fetchKey = useCallback(async (p: Period, prov: Provider, opts: FetchOptions) => {
-    if (payloadCache.isInFlight(p, prov)) return
-    payloadCache.markInFlight(p, prov)
-    const isSelected = () => selection.current.period === p && selection.current.provider === prov
+  const fetchKey = useCallback(async (sel: Selection, opts: FetchOptions) => {
+    const key = selectionKey(sel)
+    if (payloadCache.isInFlight(key)) return
+    payloadCache.markInFlight(key)
+    const isSelected = () => selectionKey(selection.current) === key
     if (opts.showOverlay && isSelected()) setOverlay(true)
     try {
-      const json = await invoke<MenubarPayload>('fetch_payload', {
-        period: p,
-        provider: prov,
+      const query = (scope: Scope, days: string[]) => invoke<MenubarPayload>('fetch_payload', {
+        period: sel.period,
+        provider: sel.provider,
+        scope,
+        days: days.length > 0 ? days.join(',') : null,
         includeOptimize: opts.includeOptimize,
       })
+      let json: MenubarPayload
+      try {
+        json = await query(sel.scope, sel.days)
+        if (sel.scope === 'combined' && isSelected()) setCombinedUnavailable(false)
+      } catch (err) {
+        // Combined needs every paired device to answer. When it cannot, show
+        // this machine under the same period and say so -- what the mac does --
+        // rather than an error where the number was.
+        if (sel.scope !== 'combined') throw err
+        json = await query('local', [])
+        if (isSelected()) setCombinedUnavailable(true)
+      }
       // A quiet (no-optimize) refresh must not wipe findings a previous full fetch had.
       if (!opts.includeOptimize) {
-        const previous = payloadCache.get(p, prov)
+        const previous = payloadCache.get(key)
         if (previous) json.optimize = previous.optimize
       }
-      payloadCache.set(p, prov, json)
+      payloadCache.set(key, json)
       if (isSelected()) {
         setPayload(json)
         // "updated Xs ago" describes what the user is looking at, so only a fetch of the
         // visible key may stamp it - a background today/all tick must not.
         setLastUpdated(new Date())
       }
-      if (p === 'today' && prov === 'all') setTodayPayload(json)
+      if (key === TODAY_ALL_KEY) setTodayPayload(json)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       if (message.includes('CLI not found')) {
@@ -130,17 +176,17 @@ export function App() {
         setError(message)
       }
     } finally {
-      payloadCache.clearInFlight(p, prov)
+      payloadCache.clearInFlight(key)
       if (isSelected()) setOverlay(false)
     }
   }, [])
 
   const refreshAll = useCallback(async (opts: FetchOptions) => {
-    const { period: p, provider: prov } = selection.current
-    if (!(p === 'today' && prov === 'all')) {
-      fetchKey('today', 'all', { includeOptimize: false, showOverlay: false })
+    const sel = selection.current
+    if (selectionKey(sel) !== TODAY_ALL_KEY) {
+      fetchKey(TODAY_ALL, { includeOptimize: false, showOverlay: false })
     }
-    await fetchKey(p, prov, opts)
+    await fetchKey(sel, opts)
   }, [fetchKey])
 
   /// The single source of truth for the CLI gate. Nothing else writes a "compatible"
@@ -176,28 +222,28 @@ export function App() {
     if (!cliReady) return
     const tick = popoverVisible
       ? () => refreshAll({ includeOptimize: true, showOverlay: false })
-      : () => fetchKey('today', 'all', { includeOptimize: false, showOverlay: false })
+      : () => fetchKey(TODAY_ALL, { includeOptimize: false, showOverlay: false })
     const id = setInterval(tick, popoverVisible ? REFRESH_ACTIVE_MS : REFRESH_IDLE_MS)
     return () => clearInterval(id)
   }, [cliReady, popoverVisible, refreshAll, fetchKey])
 
   useEffect(() => {
-    const cached = payloadCache.get(period, provider)
+    const cached = payloadCache.get(currentKey)
     setPayload(cached)
     if (!cliReady) return
+    const sel = selection.current
     if (!cached) {
-      fetchKey(period, provider, { includeOptimize: true, showOverlay: true })
-    } else if (payloadCache.age(period, provider) > STALE_MS) {
-      fetchKey(period, provider, { includeOptimize: true, showOverlay: false })
+      fetchKey(sel, { includeOptimize: true, showOverlay: true })
+    } else if (payloadCache.age(currentKey) > STALE_MS) {
+      fetchKey(sel, { includeOptimize: true, showOverlay: false })
     }
-  }, [period, provider, cliReady, fetchKey])
+  }, [currentKey, cliReady, fetchKey])
 
   useEffect(() => {
     const unlistenRefresh = listen('codeburn://refresh', () => refreshAll({ includeOptimize: true, showOverlay: true }))
     const unlistenShown = listen('codeburn://shown', () => {
       setPopoverVisible(true)
-      const { period: p, provider: prov } = selection.current
-      if (payloadCache.age(p, prov) > STALE_MS) refreshAll({ includeOptimize: true, showOverlay: false })
+      if (payloadCache.age(selectionKey(selection.current)) > STALE_MS) refreshAll({ includeOptimize: true, showOverlay: false })
     })
     const unlistenHidden = listen('codeburn://hidden', () => setPopoverVisible(false))
     const unlistenTheme = listen('codeburn://toggle-theme', () => toggleTheme())
@@ -296,7 +342,27 @@ export function App() {
     writeSetting('insight', mode)
   }
 
+  /// Picking a period leaves day mode, as `switchTo(period:)` does on the mac.
+  const switchPeriod = (p: Period) => {
+    setPeriod(p)
+    setSelectedDays([])
+  }
+
+  const switchScope = (s: Scope) => {
+    setScope(s)
+    writeSetting('scope', s === 'local' ? null : s)
+    // Combined is every provider, every day of the period: the tab and the day
+    // pick that would contradict it are cleared, as the mac does on the same switch.
+    if (s === 'combined') {
+      setProvider('all')
+      setSelectedDays([])
+    }
+  }
+
   const providers = detectedProviders(todayPayload)
+  // Same gate as `showAgentTabs` on the mac: no strip until some tool has
+  // written a session, rather than a row of muted tabs for tools never used.
+  const showAgentTabs = providers.length > 0 || detectedProviders(payload).length > 0
   const planVisible = provider === 'claude' || (provider === 'all' && providers.length === 1 && providers[0] === 'claude')
   const visibleModes = useMemo(
     () => INSIGHT_ORDER.filter(m => m !== 'plan' || planVisible),
@@ -327,7 +393,7 @@ export function App() {
         <div className="subhead">{t('AI Coding Cost Tracker')}</div>
       </header>
 
-      {!cliBlocked && !showSettings && (
+      {!cliBlocked && !showSettings && showAgentTabs && (
         <AgentTabStrip selected={provider} onSelect={setProvider} payload={todayPayload} currency={currency} />
       )}
 
@@ -354,13 +420,20 @@ export function App() {
           <SetupState status={cliStatus} checking={cliChecking} onCheckAgain={checkCli} />
         ) : (
           <>
-            <HeroSection payload={payload} currency={currency} periodLabel={periodLabel(period)} isToday={period === 'today'} />
-            <PeriodTabs selected={period} onSelect={setPeriod} />
+            <HeroSection
+              payload={payload}
+              currency={currency}
+              periodLabel={periodLabel(period)}
+              isToday={period === 'today' && selectedDays.length === 0}
+              scope={effectiveScope}
+              selectedDays={selectedDays}
+              combinedUnavailable={combinedUnavailable}
+            />
+            <PeriodTabs selected={period} onSelect={switchPeriod} selectedDays={selectedDays} onSelectDays={setSelectedDays} />
+            <ScopeTabs selected={effectiveScope} onSelect={switchScope} />
 
             {isFilteredEmpty ? (
               <EmptyProviderState provider={provider} period={period} />
-            ) : neverAnyData ? (
-              <NoDataState onRefresh={() => refreshAll({ includeOptimize: true, showOverlay: true })} />
             ) : (
               <>
                 <div className="insight-area">
@@ -378,7 +451,9 @@ export function App() {
                   )}
                   {activeInsight === 'leaderboard' && <LeaderboardInsight leaderboard={leaderboard} currency={currency} />}
                 </div>
-                {payload?.current && (
+                {neverAnyData ? (
+                  <NoDataState onRefresh={() => refreshAll({ includeOptimize: true, showOverlay: true })} />
+                ) : payload?.current && (
                   <>
                     <ActivitySection payload={payload} currency={currency} />
                     <ModelsSection
