@@ -14,6 +14,11 @@ export type MenubarPayload = {
     oneShotRate: number | null
     inputTokens: number
     outputTokens: number
+    /// Cache halves of the token volume. Optional because a CLI predating the
+    /// fields omits them; they dominate the total on any real corpus, so the
+    /// hero counts them and callers treat absence as zero rather than as none.
+    cacheReadTokens?: number
+    cacheWriteTokens?: number
     cacheHitPercent: number
     topActivities: Activity[]
     topModels: Model[]
