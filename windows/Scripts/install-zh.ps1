@@ -40,6 +40,16 @@ function Invoke-Native ([string]$Exe, [string[]]$Arguments = @()) {
   return [pscustomobject]@{ ExitCode = $code; Output = $output }
 }
 
+# 当前策略是否会拦下 .ps1 文件。取不到就当作不拦，这只是给用户的提示，
+# 判断错了顶多少一条建议，不该让安装失败。
+function Get-EffectivePolicy ([string]$Scope) {
+  $previous = $ErrorActionPreference
+  $ErrorActionPreference = 'SilentlyContinue'
+  $policy = if ($Scope) { Get-ExecutionPolicy -Scope $Scope } else { Get-ExecutionPolicy }
+  $ErrorActionPreference = $previous
+  return ($policy -in @('Restricted', 'AllSigned'))
+}
+
 function Resolve-Exe ([string]$name) {
   foreach ($candidate in @(Get-Command $name -All -ErrorAction SilentlyContinue)) {
     if ($candidate.Source -and $candidate.Source -notmatch '\.ps1$') { return $candidate.Source }
@@ -146,12 +156,9 @@ try {
   # PowerShell 优先执行 npm 装出的 codeburn.ps1，而 Windows Server（以及被组策略
   # 收紧的机器）默认禁止运行 .ps1 文件。安装脚本自身走 iex 在内存里执行，不受影响，
   # 但装完之后每次敲 codeburn 都会被拦，所以这里提前检出并给出办法。
-  $policy = try { Get-ExecutionPolicy -Scope CurrentUser } catch { 'Undefined' }
-  if ($policy -in @('Restricted', 'AllSigned')) {
-    $script:ExecutionPolicyBlocked = $true
-  } elseif ((try { Get-ExecutionPolicy } catch { 'Undefined' }) -in @('Restricted', 'AllSigned')) {
-    $script:ExecutionPolicyBlocked = $true
-  }
+  # PowerShell 的 try 只能作为语句，不能当表达式赋值（那是 C# 的写法），
+  # 所以这里用函数包一层。
+  $script:ExecutionPolicyBlocked = (Get-EffectivePolicy -Scope 'CurrentUser') -or (Get-EffectivePolicy)
 
   if ($codeburnCmd) {
     Say '设置界面语言为简体中文 ...'
