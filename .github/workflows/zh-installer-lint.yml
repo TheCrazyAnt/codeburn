@@ -115,6 +115,41 @@ jobs:
           if (-not $out) { throw 'codeburn today produced no output' }
           Write-Host $out
 
+  windows-install-msi:
+    # The job above stays -CliOnly so the locked-down-policy path is tested in
+    # isolation. This one installs the tray app for real, then runs the
+    # installer a second time: that second pass must recognise the very same
+    # package is already installed and skip -- the case a user hits by
+    # re-running the one-liner, which used to die with msiexec 1603 (error 1316
+    # underneath: same ProductCode, different package name).
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.13.0
+      - name: First run installs the MSI
+        shell: pwsh
+        run: |
+          $source = Get-Content -Raw ./windows/Scripts/install-zh.ps1
+          & ([scriptblock]::Create($source))
+          $hit = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*' -EA 0 |
+            Where-Object DisplayName -like 'CodeBurn*'
+          if (-not $hit) { throw 'the MSI did not register a CodeBurn product' }
+          Write-Host "installed: $($hit.DisplayName) $($hit.DisplayVersion) $($hit.PSChildName)"
+      - name: Second run must skip the identical package and still succeed
+        shell: pwsh
+        run: |
+          $source = Get-Content -Raw ./windows/Scripts/install-zh.ps1
+          $out = & ([scriptblock]::Create($source)) *>&1 | Out-String
+          Write-Host $out
+          if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) { throw "second run exited $LASTEXITCODE" }
+          if ($out -notmatch '跳过安装') { throw 'second run did not take the same-package skip path' }
+      - name: Tidy the tray process the installer launched
+        if: always()
+        shell: pwsh
+        run: Get-Process -Name 'CodeBurn*' -EA 0 | Stop-Process -Force -EA 0
+
   linux-install:
     runs-on: ubuntu-latest
     steps:

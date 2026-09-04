@@ -88,12 +88,18 @@ function Show-MsiFailure ([string]$logPath) {
   if ($lines.Count -eq 0) { return }
   $text = $lines -join "`n"
 
-  # 权限先判。1402 是「打不开注册表键」，配上 HKEY_LOCAL_MACHINE 就是没提权；
-  # 1729 是「产品配置失败」，重新配置一个 perMachine 产品而没有管理员权限时
-  # 就是这个组合。0x80030005 (-2147287035) 是底下那句拒绝访问。
+  # 1316「读取文件时发生网络错误」是 Windows Installer 的黑话：同一个产品已装，
+  # 而它按原始包名去找源文件没找到。新版脚本装前会比对 ProductCode 跳过这种
+  # 情况；能走到这里多半是旧脚本或手动装过。
+  if ($text -match '1: 1316 ') {
+    Write-Host '  原因：这个产品已经装过，但当初的安装包名字和现在不一样，Windows Installer 找不到原文件。' -ForegroundColor Yellow
+    Write-Host '  做法：在「设置 → 应用」里卸载 CodeBurn Menubar，再执行一次。' -ForegroundColor Yellow
+    return
+  }
+  # 权限。1402 第三段是系统错误码：5 才是拒绝访问，2 只是键不存在（回滚阶段
+  # 的正常噪音）。1729 和 0x80030005 在提权成功的失败里同样会出现，不是证据。
   if ($text -match 'Error 1925|administrator privileges|需要管理员' -or
-      $text -match '1402 2: HKEY_LOCAL_MACHINE' -or
-      $text -match '1: 1729' -or $text -match '-2147287035') {
+      $text -match '1402 2: HKEY_LOCAL_MACHINE[^\r\n]* 3: 5') {
     Write-Host '  原因：这个安装包要把产品信息写进 HKLM，需要管理员权限。' -ForegroundColor Yellow
     Write-Host '  做法：右键 PowerShell → 以管理员身份运行，再执行一次；或在弹出的确认框里点「是」。' -ForegroundColor Yellow
     return
@@ -125,6 +131,42 @@ function Show-MsiFailure ([string]$logPath) {
     $from = [Math]::Max(0, $idx - 6)
     Write-Host '  日志里失败的那一段：' -ForegroundColor Yellow
     foreach ($line in $lines[$from..$idx]) { Write-Host "    $line" -ForegroundColor DarkGray }
+  }
+}
+
+# .msi 里的 ProductCode。Tauri 每次构建都换一个新的（WiX 模板里 Product Id="*"），
+# 所以两个包 ProductCode 相同当且仅当它们是同一次构建的产物。
+function Get-MsiProductCode ([string]$path) {
+  try {
+    $installer = New-Object -ComObject WindowsInstaller.Installer
+    $db = $installer.GetType().InvokeMember('OpenDatabase', 'InvokeMethod', $null, $installer, @($path, 0))
+    $sql = 'SELECT `Value` FROM `Property` WHERE `Property` = ''ProductCode'''
+    $view = $db.GetType().InvokeMember('OpenView', 'InvokeMethod', $null, $db, @($sql))
+    $null = $view.GetType().InvokeMember('Execute', 'InvokeMethod', $null, $view, $null)
+    $record = $view.GetType().InvokeMember('Fetch', 'InvokeMethod', $null, $view, $null)
+    if (-not $record) { return $null }
+    $code = $record.GetType().InvokeMember('StringData', 'GetProperty', $null, $record, @(1))
+    $null = $view.GetType().InvokeMember('Close', 'InvokeMethod', $null, $view, $null)
+    return [string]$code
+  } catch {
+    # 读不出来就当作未知：后面照常安装，最坏也只是回到今天之前的行为。
+    return $null
+  }
+}
+
+# 已装的 CodeBurn 托盘应用。MSI 装的产品在 Uninstall 下的键名就是它的 ProductCode。
+function Get-InstalledCodeBurn {
+  $hives = @(
+    'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall',
+    'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall',
+    'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'
+  )
+  foreach ($hive in $hives) {
+    Get-ItemProperty "$hive\*" -ErrorAction SilentlyContinue |
+      Where-Object { $_.DisplayName -like 'CodeBurn*' } |
+      ForEach-Object {
+        [pscustomobject]@{ ProductCode = $_.PSChildName; Version = $_.DisplayVersion; Name = $_.DisplayName }
+      }
   }
 }
 
@@ -242,6 +284,18 @@ try {
   $msiPath = Join-Path $tmp $msi.Name
   Get-Verified $msi $msiPath $headers
 
+  # 同一个安装包装第二遍会失败，而且失败得很难看：Windows Installer 认出
+  # ProductCode 已装，走「重新配置」路径，按当初登记的原始包名到新目录里找
+  # 文件（比如用户手动装时随手起的 cb-zh7.msi），找不到就 1316，回滚成 1603。
+  # 它要的是「同一个产品」，不是「同一个版本号」—— 这里所有 zh 版本的版本号
+  # 都是 0.9.23，能区分的只有 ProductCode。已装的就是这个包，那就没有事可做。
+  $newCode = Get-MsiProductCode $msiPath
+  $installed = @(Get-InstalledCodeBurn)
+  $samePackage = $newCode -and ($installed | Where-Object { $_.ProductCode -eq $newCode })
+  if ($samePackage) {
+    Say "托盘应用已经是 $($msi.Tag)（同一个安装包），跳过安装。"
+  } else {
+
   # 升级时旧版通常正在托盘里跑着，文件被占用。交互式安装会弹「需要关闭以下
   # 程序」让人点确认，静默安装没人能点，msiexec 直接以 1603 收场。macOS 的
   # install-zh.sh 一直有对应的 pkill，这里补上。
@@ -284,13 +338,18 @@ try {
     exit 1
   }
 
-  $exe = Get-ChildItem -Path @(
-    "$env:LOCALAPPDATA\Programs",
-    "${env:ProgramFiles}",
-    "${env:ProgramFiles(x86)}"
-  ) -Filter 'CodeBurn*.exe' -Recurse -ErrorAction SilentlyContinue |
-    Select-Object -First 1
-  if ($exe) { Say '启动 ...'; Start-Process $exe.FullName }
+  } # samePackage
+
+  # 跳过安装时应用多半还在跑着；只在没跑的时候拉起，别开出第二个托盘图标。
+  if (-not (Get-Process -Name 'CodeBurn*' -ErrorAction SilentlyContinue)) {
+    $exe = Get-ChildItem -Path @(
+      "$env:LOCALAPPDATA\Programs",
+      "${env:ProgramFiles}",
+      "${env:ProgramFiles(x86)}"
+    ) -Filter 'CodeBurn*.exe' -Recurse -ErrorAction SilentlyContinue |
+      Select-Object -First 1
+    if ($exe) { Say '启动 ...'; Start-Process $exe.FullName }
+  }
 
   Write-Host ''
   Write-Host "√ 安装完成" -ForegroundColor Green
