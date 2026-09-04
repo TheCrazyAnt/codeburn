@@ -17,7 +17,9 @@ fn codeburn_config_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(".codeburn"))
 }
 
-fn config_path() -> PathBuf {
+/// The CLI's own config file. Shared with `leaderboard.rs`, which reads the
+/// session state the CLI stores there rather than keeping a second copy.
+pub fn config_path() -> PathBuf {
     codeburn_config_dir().join("config.json")
 }
 

@@ -163,7 +163,11 @@ impl CodeburnCli {
         Ok(payload)
     }
 
-    async fn run_capture(&self, args: &[&str], timeout_secs: u64) -> Result<String> {
+    /// The one place a `codeburn` argv is assembled. Every spawn -- captured or
+    /// streamed -- goes through it so the console-window suppression, the null
+    /// stdin (nothing we run is ever interactive) and the CODEBURN_BIN prefix
+    /// args can never drift between call sites.
+    fn build_command(&self, args: &[&str]) -> Command {
         let mut full_args = self.extra_args.clone();
         full_args.extend(args.iter().map(|s| s.to_string()));
 
@@ -178,12 +182,34 @@ impl CodeburnCli {
             const CREATE_NO_WINDOW: u32 = 0x08000000;
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
-        let mut child = cmd.spawn().map_err(|err| {
-            anyhow!(
-                "CodeBurn CLI not found ({}). Install it with `npm install -g codeburn`.",
-                spawn_error_summary(&self.program, &err)
-            )
-        })?;
+        cmd
+    }
+
+    fn spawn_error(&self, err: &std::io::Error) -> anyhow::Error {
+        anyhow!(
+            "CodeBurn CLI not found ({}). Install it with `npm install -g codeburn`.",
+            spawn_error_summary(&self.program, err)
+        )
+    }
+
+    /// Spawns a subcommand whose stdout is meant to be read as it arrives rather
+    /// than at exit. `leaderboard login` is the only such command today: it
+    /// prints a device code and then polls GitHub for minutes, so waiting for
+    /// the process to finish would mean showing the code after it expired.
+    pub fn spawn_streaming(&self, args: &[&str]) -> Result<tokio::process::Child> {
+        self.build_command(args)
+            .spawn()
+            .map_err(|err| self.spawn_error(&err))
+    }
+
+    /// Runs a subcommand to completion and hands back both streams plus the exit
+    /// verdict, so a caller that wants to surface the CLI's own error text can,
+    /// instead of the composite message `run_capture` builds.
+    pub async fn run_parts(&self, args: &[&str], timeout_secs: u64) -> Result<CliRun> {
+        let mut child = self
+            .build_command(args)
+            .spawn()
+            .map_err(|err| self.spawn_error(&err))?;
 
         let mut stdout = child.stdout.take().ok_or_else(|| anyhow!("no stdout"))?;
         let mut stderr = child.stderr.take().ok_or_else(|| anyhow!("no stderr"))?;
@@ -208,12 +234,31 @@ impl CodeburnCli {
         let stdout_bytes = stdout_task.await.unwrap_or_default();
         let stderr_bytes = stderr_task.await.unwrap_or_default();
 
-        if !status.success() {
-            let msg = String::from_utf8_lossy(&stderr_bytes);
-            bail!("codeburn CLI exited {}: {}", status, msg.trim());
-        }
-        Ok(String::from_utf8_lossy(&stdout_bytes).into_owned())
+        Ok(CliRun {
+            success: status.success(),
+            status: status.to_string(),
+            stdout: String::from_utf8_lossy(&stdout_bytes).into_owned(),
+            stderr: String::from_utf8_lossy(&stderr_bytes).into_owned(),
+        })
     }
+
+    async fn run_capture(&self, args: &[&str], timeout_secs: u64) -> Result<String> {
+        let run = self.run_parts(args, timeout_secs).await?;
+        if !run.success {
+            bail!("codeburn CLI exited {}: {}", run.status, run.stderr.trim());
+        }
+        Ok(run.stdout)
+    }
+}
+
+/// Outcome of one captured CLI run.
+pub struct CliRun {
+    pub success: bool,
+    /// `ExitStatus`'s own rendering ("exit status: 1"), kept as text so callers
+    /// need no platform-specific handling to report it.
+    pub status: String,
+    pub stdout: String,
+    pub stderr: String,
 }
 
 fn spawn_error_summary(program: &str, err: &std::io::Error) -> String {

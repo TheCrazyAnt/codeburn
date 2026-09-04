@@ -1,6 +1,6 @@
 import type { MenubarPayload } from '../lib/payload'
 import type { CurrencyState } from '../lib/currency'
-import { formatCurrency } from '../lib/currency'
+import { formatCurrency, formatTokens } from '../lib/currency'
 import { prettyDate, todayKey } from '../lib/dates'
 import { t, tn } from '../lib/i18n'
 import { SectionCaption } from './CollapsibleSection'
@@ -32,10 +32,17 @@ export function HeroSection({ payload, currency, periodLabel, isToday }: Props) 
                 {tn('%s call', '%s calls', payload.current.calls, payload.current.calls.toLocaleString())}
               </span>
               <span className="hero-sessions">{tn('%d session', '%d sessions', payload.current.sessions)}</span>
+              {/* Token usage is the other half of the headline question
+                  ("what did I spend, and on how much?"), so it stays beside
+                  the amount rather than living only inside the models list. */}
+              <span className="hero-tokens">
+                {t('%s tokens', formatTokens(payload.current.inputTokens + payload.current.outputTokens))}
+              </span>
             </>
           ) : (
             <>
               <span className="hero-skeleton-line" />
+              <span className="hero-skeleton-line short" />
               <span className="hero-skeleton-line short" />
             </>
           )}

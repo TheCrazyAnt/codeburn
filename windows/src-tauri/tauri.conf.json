@@ -31,7 +31,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' ipc: https://api.frankfurter.app"
+      "csp": "default-src 'self'; img-src 'self' data: https://avatars.githubusercontent.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' ipc: https://api.frankfurter.app"
     },
     "trayIcon": {
       "id": "codeburn-tray",

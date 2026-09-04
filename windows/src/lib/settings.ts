@@ -9,6 +9,10 @@ const KEYS = {
   /// 'system' | 'en' | 'zh-CN'. 'system' (or absent) follows `payload.lang`,
   /// i.e. whatever `codeburn lang` resolved, and then the webview locale.
   language: 'codeburn.language',
+  /// Leaderboard period board and ranking metric, remembered across popover
+  /// openings the way macOS remembers them in UserDefaults.
+  leaderboardBoard: 'codeburn.leaderboardBoard',
+  leaderboardMetric: 'codeburn.leaderboardMetric',
 } as const
 
 type Key = keyof typeof KEYS

@@ -25,6 +25,12 @@ export type MenubarPayload = {
       calls?: number
       hasUsage?: boolean
     }>
+    /// Spend on turns that had to be retried. Absent on payloads from a CLI
+    /// that predates the block, so the Optimize tab treats absence as zero.
+    retryTax?: RetryTax
+    /// What the same edits would have cost on the cheapest model that was
+    /// already doing them. Absent on older payloads, as above.
+    routingWaste?: RoutingWaste
   }
   optimize: {
     findingCount: number
@@ -32,6 +38,27 @@ export type MenubarPayload = {
     topFindings: Array<{ title: string; impact: 'high' | 'medium' | 'low'; savingsUSD: number }>
   }
   history: { daily: DailyEntry[] }
+}
+
+export type RetryTax = {
+  totalUSD: number
+  retries: number
+  editTurns: number
+  byModel: Array<{ name: string; taxUSD: number; retries: number; retriesPerEdit: number | null }>
+}
+
+export type RoutingWaste = {
+  totalSavingsUSD: number
+  baselineModel: string
+  baselineCostPerEdit: number
+  byModel: Array<{
+    name: string
+    costPerEdit: number
+    editTurns: number
+    actualUSD: number
+    counterfactualUSD: number
+    savingsUSD: number
+  }>
 }
 
 export type Activity = {

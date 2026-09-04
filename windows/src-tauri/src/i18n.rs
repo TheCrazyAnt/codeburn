@@ -156,6 +156,16 @@ mod tests {
         }
     }
 
+    /// The `set_language` command answers with `as_tag` and the webview stores
+    /// that answer, so a tag that will not parse back would silently pin the
+    /// tray to English on the next switch.
+    #[test]
+    fn every_tag_parses_back_to_its_own_language() {
+        for language in [Language::English, Language::SimplifiedChinese] {
+            assert_eq!(Language::from_locale(language.as_tag()), Some(language));
+        }
+    }
+
     #[test]
     fn configured_language_beats_the_os_locale() {
         assert_eq!(resolve_language(Some("zh-CN")), Language::SimplifiedChinese);

@@ -1,17 +1,23 @@
 import { t } from '../lib/i18n'
 
-export type InsightMode = 'plan' | 'trend' | 'forecast' | 'pulse' | 'stats'
+export type InsightMode =
+  | 'plan' | 'trend' | 'forecast' | 'calendar' | 'pulse' | 'stats' | 'optimize' | 'leaderboard'
 
 /// Same order as the macOS InsightMode enum: Plan first when it is visible.
-export const INSIGHT_ORDER: InsightMode[] = ['plan', 'trend', 'forecast', 'pulse', 'stats']
+export const INSIGHT_ORDER: InsightMode[] = [
+  'plan', 'trend', 'forecast', 'calendar', 'pulse', 'stats', 'optimize', 'leaderboard',
+]
 
 export function insightLabel(m: InsightMode): string {
   switch (m) {
     case 'plan': return t('Plan')
     case 'trend': return t('Trend')
     case 'forecast': return t('Forecast')
+    case 'calendar': return t('Calendar')
     case 'pulse': return t('Pulse')
     case 'stats': return t('Stats')
+    case 'optimize': return t('Optimize')
+    case 'leaderboard': return t('Leaderboard')
   }
 }
 

@@ -3,6 +3,7 @@ mod cli;
 mod config;
 mod fx;
 mod i18n;
+mod leaderboard;
 mod plan;
 /// The spend-in-the-tray badge is a second tray icon, which only the Tauri tray backend
 /// provides; Linux runs its own SNI tray (`tray_linux`) and has no equivalent, so the
@@ -109,6 +110,12 @@ pub fn run() {
             commands::plan_usage,
             commands::launch_at_login,
             commands::set_launch_at_login,
+            commands::leaderboard_state,
+            commands::leaderboard_board,
+            commands::leaderboard_action,
+            commands::leaderboard_login,
+            commands::leaderboard_login_cancel,
+            commands::set_language,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
@@ -125,22 +132,7 @@ fn build_tray_tauri(app: &AppHandle) -> tauri::Result<()> {
         return Ok(());
     };
 
-    let open = MenuItem::with_id(app, "open", i18n::t("Open CodeBurn"), true, None::<&str>)?;
-    let refresh = MenuItem::with_id(app, "refresh", i18n::t("Refresh"), true, None::<&str>)?;
-    let theme = MenuItem::with_id(app, "toggle_theme", i18n::t("Toggle Dark/Light"), true, None::<&str>)?;
-    let report = MenuItem::with_id(app, "report", i18n::t("Open Full Report"), true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", i18n::t("Quit CodeBurn"), true, None::<&str>)?;
-    let menu = Menu::with_items(
-        app,
-        &[
-            &open,
-            &refresh,
-            &theme,
-            &report,
-            &PredefinedMenuItem::separator(app)?,
-            &quit,
-        ],
-    )?;
+    let menu = tray_menu(app)?;
 
     tray.set_menu(Some(menu.clone()))?;
     tray.set_show_menu_on_left_click(false)?;
@@ -165,6 +157,55 @@ fn build_tray_tauri(app: &AppHandle) -> tauri::Result<()> {
         .build(app)?
         .set_visible(false)?;
 
+    Ok(())
+}
+
+/// Builds the tray context menu in whatever language is active right now.
+/// Both tray icons (logo and spend badge) share one menu instance.
+#[cfg(not(target_os = "linux"))]
+fn tray_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
+    let open = MenuItem::with_id(app, "open", i18n::t("Open CodeBurn"), true, None::<&str>)?;
+    let refresh = MenuItem::with_id(app, "refresh", i18n::t("Refresh"), true, None::<&str>)?;
+    let theme = MenuItem::with_id(app, "toggle_theme", i18n::t("Toggle Dark/Light"), true, None::<&str>)?;
+    let report = MenuItem::with_id(app, "report", i18n::t("Open Full Report"), true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", i18n::t("Quit CodeBurn"), true, None::<&str>)?;
+    Menu::with_items(
+        app,
+        &[
+            &open,
+            &refresh,
+            &theme,
+            &report,
+            &PredefinedMenuItem::separator(app)?,
+            &quit,
+        ],
+    )
+}
+
+/// Switches the language the Rust side renders in and rebuilds the tray menu so
+/// it matches. Without this the picker in Settings only reaches the webview, and
+/// a user who chooses Chinese on an English system gets a Chinese window hanging
+/// off an English right-click menu.
+#[cfg(not(target_os = "linux"))]
+fn apply_language(app: &AppHandle, language: i18n::Language) -> tauri::Result<()> {
+    if language == i18n::language() {
+        return Ok(());
+    }
+    i18n::set_language(language);
+    let menu = tray_menu(app)?;
+    for id in [TRAY_ID, BADGE_TRAY_ID] {
+        if let Some(tray) = app.tray_by_id(id) {
+            tray.set_menu(Some(menu.clone()))?;
+        }
+    }
+    Ok(())
+}
+
+/// The Linux tray carries no menu of its own -- its actions live in the popover
+/// footer, which the webview relabels itself -- so there is nothing to rebuild.
+#[cfg(target_os = "linux")]
+fn apply_language(_app: &AppHandle, language: i18n::Language) -> tauri::Result<()> {
+    i18n::set_language(language);
     Ok(())
 }
 
@@ -393,6 +434,21 @@ mod commands {
             .map_err(|e| e.to_string())
     }
 
+    /// Mirrors the Settings language picker onto the Rust side. `system` hands the
+    /// decision back to the normal resolution order (`CODEBURN_LANG`, the CLI's
+    /// stored `lang`, then the OS locale) rather than pinning English.
+    #[tauri::command]
+    pub fn set_language(tag: String, app: AppHandle) -> Result<String, String> {
+        let language = if tag == "system" {
+            crate::i18n::resolve_language(crate::config::stored_language().as_deref())
+        } else {
+            crate::i18n::Language::from_locale(&tag)
+                .ok_or_else(|| format!("Unsupported language tag: {tag}"))?
+        };
+        crate::apply_language(&app, language).map_err(|e| e.to_string())?;
+        Ok(language.as_tag().to_string())
+    }
+
     /// Re-resolves the CLI each call so a freshly installed `codeburn` is picked up
     /// without restarting the tray app.
     #[tauri::command]
@@ -521,5 +577,57 @@ mod commands {
     #[tauri::command]
     pub async fn plan_usage(state: State<'_, AppState>) -> Result<crate::plan::PlanUsage, String> {
         state.plan.fetch().await.map_err(|e| e.to_string())
+    }
+
+    /// Whether a leaderboard session is stored, and the identity + opt-in flag
+    /// beside it. Never the session token itself.
+    #[tauri::command]
+    pub fn leaderboard_state() -> crate::leaderboard::LeaderboardAccount {
+        crate::leaderboard::read_account()
+    }
+
+    /// Reading a board is anonymous and uploads nothing.
+    #[tauri::command]
+    pub async fn leaderboard_board(
+        board: String,
+        metric: String,
+        limit: u32,
+        state: State<'_, AppState>,
+    ) -> Result<Value, String> {
+        let cli = state.cli.lock().map_err(|e| e.to_string())?.clone();
+        crate::leaderboard::fetch_board(&cli, &board, &metric, limit)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    /// `join` / `upload` are the only actions that transmit anything, and both
+    /// reach here only from an explicit click in the popover.
+    #[tauri::command]
+    pub async fn leaderboard_action(
+        action: String,
+        state: State<'_, AppState>,
+    ) -> Result<crate::leaderboard::LeaderboardAccount, String> {
+        let cli = state.cli.lock().map_err(|e| e.to_string())?.clone();
+        crate::leaderboard::run_action(&cli, &action)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    /// Starts the GitHub device flow. Returns as soon as the child is running;
+    /// the code, and then the verdict, arrive on `codeburn://leaderboard-login`.
+    #[tauri::command]
+    pub async fn leaderboard_login(
+        app: AppHandle,
+        state: State<'_, AppState>,
+    ) -> Result<(), String> {
+        let cli = state.cli.lock().map_err(|e| e.to_string())?.clone();
+        crate::leaderboard::start_login(app, cli)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    pub fn leaderboard_login_cancel() {
+        crate::leaderboard::cancel_login();
     }
 }

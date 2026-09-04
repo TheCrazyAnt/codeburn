@@ -193,3 +193,44 @@ export function PowerIcon(p: IconProps) {
     </Svg>
   )
 }
+
+/// Stands in for `trophy.fill` on the leaderboard join card.
+export function TrophyIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M4.5 2h7v3.5a3.5 3.5 0 0 1-7 0z" fill="currentColor" stroke="none" />
+      <path d="M4.5 3H2.8v1.2A2.2 2.2 0 0 0 5 6.4M11.5 3h1.7v1.2a2.2 2.2 0 0 1-2.2 2.2" />
+      <path d="M8 9v2.5M5.5 14h5l-.6-2.5H6.1z" />
+    </Svg>
+  )
+}
+
+/// Solid person, the neutral placeholder behind a missing GitHub avatar.
+export function PersonIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <circle cx="8" cy="5.6" r="2.8" fill="currentColor" stroke="none" />
+      <path d="M2.6 14.5c.7-3.1 2.8-4.7 5.4-4.7s4.7 1.6 5.4 4.7z" fill="currentColor" stroke="none" />
+    </Svg>
+  )
+}
+
+/// `arrow.2.squarepath` -- the retry-tax marker in the Optimize tab.
+export function RetryIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M2.5 6.5V4.2A1.7 1.7 0 0 1 4.2 2.5h6.3M13.5 9.5v2.3a1.7 1.7 0 0 1-1.7 1.7H5.5" />
+      <path d="M8.5 .8 10.7 2.5 8.5 4.2M7.5 15.2 5.3 13.5l2.2-1.7" />
+    </Svg>
+  )
+}
+
+/// `arrow.triangle.swap` -- the routing-waste marker in the Optimize tab.
+export function SwapIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M2 5.5h11M10.5 3 13 5.5 10.5 8" />
+      <path d="M14 10.5H3M5.5 8 3 10.5 5.5 13" />
+    </Svg>
+  )
+}

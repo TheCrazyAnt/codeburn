@@ -21,6 +21,10 @@ import { ForecastInsight } from './components/ForecastInsight'
 import { PulseInsight } from './components/PulseInsight'
 import { StatsInsight } from './components/StatsInsight'
 import { PlanInsight } from './components/PlanInsight'
+import { CalendarInsight } from './components/CalendarInsight'
+import { OptimizeInsight } from './components/OptimizeInsight'
+import { LeaderboardInsight } from './components/LeaderboardInsight'
+import { useLeaderboard } from './lib/useLeaderboard'
 import { FindingsSection } from './components/FindingsSection'
 import { ActivitySection } from './components/ActivitySection'
 import { LoadingOverlay } from './components/LoadingOverlay'
@@ -85,6 +89,10 @@ export function App() {
   // Repaints the popover when the language changes under it -- the CLI payload
   // carries `lang`, so the right language usually only arrives after first paint.
   const language = useLanguage()
+
+  /// One leaderboard controller for both the tab and the Settings group, so the
+  /// board and the account can never disagree about who is signed in.
+  const leaderboard = useLeaderboard()
 
   const selection = useRef({ period, provider })
   selection.current = { period, provider }
@@ -223,7 +231,13 @@ export function App() {
   // choice in Settings wins over both.
   const payloadLang = todayPayload?.lang ?? payload?.lang ?? null
   useEffect(() => {
-    setLanguage(resolveLanguage({ chosen: languageChoice, payload: payloadLang }))
+    const resolved = resolveLanguage({ chosen: languageChoice, payload: payloadLang })
+    setLanguage(resolved)
+    // The tray context menu is rendered by Rust, which resolves its own language
+    // at startup and would otherwise stay in the old one after a switch here.
+    // Sending the already-resolved tag (not the raw choice) is what keeps the two
+    // sides from ever disagreeing about what `system` means.
+    invoke('set_language', { tag: resolved }).catch(() => {})
   }, [languageChoice, payloadLang])
 
   const todayCost = todayPayload?.current?.cost ?? null
@@ -333,6 +347,7 @@ export function App() {
             cliStatus={cliStatus}
             onCheckCli={checkCli}
             cliChecking={cliChecking}
+            leaderboard={leaderboard}
             onQuit={() => invoke('quit_app').catch(() => {})}
           />
         ) : cliBlocked && cliStatus ? (
@@ -355,8 +370,13 @@ export function App() {
                   )}
                   {activeInsight === 'trend' && <TrendInsight days={payload?.history?.daily ?? []} currency={currency} />}
                   {activeInsight === 'forecast' && <ForecastInsight days={payload?.history?.daily ?? []} currency={currency} />}
+                  {activeInsight === 'calendar' && <CalendarInsight days={payload?.history?.daily ?? []} currency={currency} />}
                   {activeInsight === 'pulse' && payload && <PulseInsight payload={payload} currency={currency} />}
                   {activeInsight === 'stats' && payload && <StatsInsight payload={payload} currency={currency} period={period} />}
+                  {activeInsight === 'optimize' && payload && (
+                    <OptimizeInsight payload={payload} currency={currency} onOpenTerminal={openTerminal} />
+                  )}
+                  {activeInsight === 'leaderboard' && <LeaderboardInsight leaderboard={leaderboard} currency={currency} />}
                 </div>
                 {payload?.current && (
                   <>
