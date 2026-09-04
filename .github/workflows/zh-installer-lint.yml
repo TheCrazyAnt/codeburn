@@ -77,7 +77,17 @@ jobs:
           Set-ExecutionPolicy -Scope Process -ExecutionPolicy Restricted -Force
           Write-Host "policy: $(Get-ExecutionPolicy -Scope Process)"
           $source = Get-Content -Raw ./windows/Scripts/install-zh.ps1
-          & ([scriptblock]::Create($source)) -CliOnly
+          try {
+            & ([scriptblock]::Create($source)) -CliOnly
+          } catch {
+            # The one-line message hides which statement actually failed, and
+            # this job is the only place the locked-down path is exercised.
+            Write-Host "=== full error ==="
+            $_ | Format-List * -Force
+            $_.ScriptStackTrace
+            $_.InvocationInfo | Format-List * -Force
+            throw
+          }
       - name: codeburn.cmd must work even when .ps1 execution is blocked
         # Windows Server and locked-down machines default to a Restricted
         # execution policy, which blocks the codeburn.ps1 shim npm installs.

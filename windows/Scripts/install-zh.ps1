@@ -29,16 +29,15 @@ if (-not $IsWindows -and $PSVersionTable.PSVersion.Major -ge 6) { Die '这个脚
 # PowerShell 会把外部程序写到 stderr 的任何内容变成错误记录，配合脚本开头的
 # $ErrorActionPreference = 'Stop'，npm 一行无害的 "npm notice" 就足以中断安装。
 # 统一走这个包装：临时放宽错误策略，只按退出码判断成败。
-function Invoke-Native {
-  param([Parameter(Mandatory)][string]$Exe, [string[]]$Arguments = @())
+function Invoke-Native ([string]$Exe, [string[]]$Arguments = @()) {
+  # 刻意保持成最朴素的写法：这个脚本要在被收紧过的 shell 里通过 iex 执行，
+  # 少一个语言特性就少一处出意外的可能。
   $previous = $ErrorActionPreference
   $ErrorActionPreference = 'Continue'
-  try {
-    $output = & $Exe @Arguments 2>&1 | Out-String
-    return [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = $output }
-  } finally {
-    $ErrorActionPreference = $previous
-  }
+  $output = (& $Exe @Arguments 2>&1 | Out-String)
+  $code = $LASTEXITCODE
+  $ErrorActionPreference = $previous
+  return [pscustomobject]@{ ExitCode = $code; Output = $output }
 }
 
 function Resolve-Exe ([string]$name) {
