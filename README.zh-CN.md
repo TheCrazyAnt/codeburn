@@ -27,6 +27,8 @@ irm https://raw.githubusercontent.com/TheCrazyAnt/codeburn/zh-hans/windows/Scrip
 
 只要命令行：`& ([scriptblock]::Create((irm https://raw.githubusercontent.com/TheCrazyAnt/codeburn/zh-hans/windows/Scripts/install-zh.ps1))) -CliOnly`
 
+安装托盘应用时会弹一次 UAC 确认框（安装包要把产品信息写进 HKLM，需要管理员权限），点「是」。
+
 托盘应用未做代码签名，Windows SmartScreen 首次会拦截，点「更多信息」→「仍要运行」。
 
 ### Linux / 其他

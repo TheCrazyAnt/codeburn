@@ -88,12 +88,19 @@ function Show-MsiFailure ([string]$logPath) {
   if ($lines.Count -eq 0) { return }
   $text = $lines -join "`n"
 
-  if ($text -match 'Error 1925|administrator privileges|需要管理员') {
-    Write-Host '  原因：这个安装包需要管理员权限。' -ForegroundColor Yellow
-    Write-Host '  做法：在开始菜单里右键 PowerShell → 以管理员身份运行，再执行一次。' -ForegroundColor Yellow
+  # 权限先判。1402 是「打不开注册表键」，配上 HKEY_LOCAL_MACHINE 就是没提权；
+  # 1729 是「产品配置失败」，重新配置一个 perMachine 产品而没有管理员权限时
+  # 就是这个组合。0x80030005 (-2147287035) 是底下那句拒绝访问。
+  if ($text -match 'Error 1925|administrator privileges|需要管理员' -or
+      $text -match '1402 2: HKEY_LOCAL_MACHINE' -or
+      $text -match '1: 1729' -or $text -match '-2147287035') {
+    Write-Host '  原因：这个安装包要把产品信息写进 HKLM，需要管理员权限。' -ForegroundColor Yellow
+    Write-Host '  做法：右键 PowerShell → 以管理员身份运行，再执行一次；或在弹出的确认框里点「是」。' -ForegroundColor Yellow
     return
   }
-  if ($text -match 'Error 1603.*being used|FilesInUse|being used by another|正在使用') {
+  # 「FilesInUse」是每份日志都有的标准动作名，拿它当证据会把无关的失败也说成
+  # 文件占用 —— 只认 Windows 真正判定被占用时写下的那句。
+  if ($text -match 'Files in Use|being used by another process|InstallValidate.*in use') {
     Write-Host '  原因：有文件正被占用（托盘应用可能还在运行）。' -ForegroundColor Yellow
     Write-Host '  做法：在任务栏右下角退出 CodeBurn，或重启一次电脑，再执行一次。' -ForegroundColor Yellow
     return
@@ -109,7 +116,7 @@ function Show-MsiFailure ([string]$logPath) {
     return
   }
 
-  # 认不出来：把日志里标了失败的那几行原样给出去。
+  # 认不出来：把日志里标了失败的那几行原样给出去。原文永远比猜测可靠。
   $idx = -1
   for ($i = 0; $i -lt $lines.Count; $i++) {
     if ($lines[$i] -match 'Return value 3\.') { $idx = $i }
@@ -253,7 +260,20 @@ try {
   # 不要用 $args：它是 PowerShell 的自动变量，赋值会影响参数绑定。
   $msiArgs = if ($Interactive) { @('/i', "`"$msiPath`"") } else { @('/i', "`"$msiPath`"", '/qb', '/norestart') }
   $msiArgs += @('/l*v', "`"$msiLog`"")
-  $proc = Start-Process msiexec.exe -ArgumentList $msiArgs -Wait -PassThru
+  # 这个 .msi 是 perMachine 安装：产品信息写在 HKLM，装/改都要管理员权限。
+  # 首次安装时 msiexec 自己会弹 UAC，但产品已在、走「重新配置」路径时它不弹，
+  # 于是直接卡在写 HKLM\...\Installer\Rollback\Scripts 上（1402 + 拒绝访问
+  # 0x80030005，再 1729 配置失败，最后回滚成 1603）。所以这里主动提权。
+  # 已经是管理员时 -Verb RunAs 不会再弹框。
+  $isAdmin = ([Security.Principal.WindowsPrincipal] `
+    [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+      [Security.Principal.WindowsBuiltInRole]::Administrator)
+  if (-not $isAdmin) { Say '安装托盘应用需要管理员权限，接下来会弹出确认框，请点「是」...' }
+  try {
+    $proc = Start-Process msiexec.exe -ArgumentList $msiArgs -Wait -PassThru -Verb RunAs -ErrorAction Stop
+  } catch {
+    Die "没有拿到管理员权限，托盘应用未安装。在弹出的确认框里点「是」再试一次，或者右键 PowerShell → 以管理员身份运行。`n（命令行已经装好了，可以直接用 codeburn。）"
+  }
   # 3010 = 安装成功，但需要重启才能完成
   if ($proc.ExitCode -ne 0 -and $proc.ExitCode -ne 3010) {
     $keep = Join-Path $env:TEMP 'codeburn-msi.log'
