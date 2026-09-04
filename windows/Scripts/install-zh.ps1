@@ -79,6 +79,48 @@ try {
   Die "无法访问 GitHub Releases：$($_.Exception.Message)"
 }
 
+# 把 MSI 日志里真正的失败原因翻译成一句人话。日志里标记失败动作的惯例是
+# 「Return value 3」，它前面那几行才写着到底哪一步、为什么。认得出的几种给出
+# 对应做法，认不出的就把原始行打出来 —— 有原文总比只有一个 1603 强。
+function Show-MsiFailure ([string]$logPath) {
+  if (-not (Test-Path $logPath)) { return }
+  $lines = @(Get-Content $logPath -ErrorAction SilentlyContinue)
+  if ($lines.Count -eq 0) { return }
+  $text = $lines -join "`n"
+
+  if ($text -match 'Error 1925|administrator privileges|需要管理员') {
+    Write-Host '  原因：这个安装包需要管理员权限。' -ForegroundColor Yellow
+    Write-Host '  做法：在开始菜单里右键 PowerShell → 以管理员身份运行，再执行一次。' -ForegroundColor Yellow
+    return
+  }
+  if ($text -match 'Error 1603.*being used|FilesInUse|being used by another|正在使用') {
+    Write-Host '  原因：有文件正被占用（托盘应用可能还在运行）。' -ForegroundColor Yellow
+    Write-Host '  做法：在任务栏右下角退出 CodeBurn，或重启一次电脑，再执行一次。' -ForegroundColor Yellow
+    return
+  }
+  if ($text -match 'Error 1618|another installation') {
+    Write-Host '  原因：Windows 上另有一个安装正在进行。' -ForegroundColor Yellow
+    Write-Host '  做法：等它结束（或重启电脑）后再执行一次。' -ForegroundColor Yellow
+    return
+  }
+  if ($text -match 'Error 1638|already installed') {
+    Write-Host '  原因：已经装了同版本或更新的版本。' -ForegroundColor Yellow
+    Write-Host '  做法：在「设置 → 应用」里卸载 CodeBurn Menubar 后再执行一次。' -ForegroundColor Yellow
+    return
+  }
+
+  # 认不出来：把日志里标了失败的那几行原样给出去。
+  $idx = -1
+  for ($i = 0; $i -lt $lines.Count; $i++) {
+    if ($lines[$i] -match 'Return value 3\.') { $idx = $i }
+  }
+  if ($idx -ge 0) {
+    $from = [Math]::Max(0, $idx - 6)
+    Write-Host '  日志里失败的那一段：' -ForegroundColor Yellow
+    foreach ($line in $lines[$from..$idx]) { Write-Host "    $line" -ForegroundColor DarkGray }
+  }
+}
+
 # 只认 windows-v* 的发布，里面必须同时有 .msi 和 .msi.sha256
 # GitHub 按标签名的字符串顺序返回发布，"zh10" 会排在 "zh1" 和 "zh2" 之间。
 # 把数字段左侧补零后再排序，才能让 zh10 胜过 zh9。
@@ -193,12 +235,34 @@ try {
   $msiPath = Join-Path $tmp $msi.Name
   Get-Verified $msi $msiPath $headers
 
+  # 升级时旧版通常正在托盘里跑着，文件被占用。交互式安装会弹「需要关闭以下
+  # 程序」让人点确认，静默安装没人能点，msiexec 直接以 1603 收场。macOS 的
+  # install-zh.sh 一直有对应的 pkill，这里补上。
+  $running = @(Get-Process -Name 'CodeBurn*' -ErrorAction SilentlyContinue)
+  if ($running.Count -gt 0) {
+    Say '关闭正在运行的托盘应用 ...'
+    $running | Stop-Process -Force -ErrorAction SilentlyContinue
+    # 进程退出和它对文件的句柄释放不是同一刻，等一下再交给 msiexec。
+    Start-Sleep -Seconds 2
+  }
+
   Say '安装 ...'
+  # 1603 只是「安装期间发生致命错误」，本身不含任何线索。留一份详细日志，
+  # 失败时把里面真正的原因翻出来，别让人对着一个数字干瞪眼。
+  $msiLog = Join-Path $tmp 'msi.log'
   # 不要用 $args：它是 PowerShell 的自动变量，赋值会影响参数绑定。
   $msiArgs = if ($Interactive) { @('/i', "`"$msiPath`"") } else { @('/i', "`"$msiPath`"", '/qb', '/norestart') }
+  $msiArgs += @('/l*v', "`"$msiLog`"")
   $proc = Start-Process msiexec.exe -ArgumentList $msiArgs -Wait -PassThru
   # 3010 = 安装成功，但需要重启才能完成
-  if ($proc.ExitCode -ne 0 -and $proc.ExitCode -ne 3010) { Die "安装失败，msiexec 退出码 $($proc.ExitCode)。" }
+  if ($proc.ExitCode -ne 0 -and $proc.ExitCode -ne 3010) {
+    $keep = Join-Path $env:TEMP 'codeburn-msi.log'
+    if (Test-Path $msiLog) { Copy-Item $msiLog $keep -Force -ErrorAction SilentlyContinue }
+    Write-Host "x 安装失败，msiexec 退出码 $($proc.ExitCode)。" -ForegroundColor Red
+    Show-MsiFailure $keep
+    Write-Host "  完整日志：$keep" -ForegroundColor Yellow
+    exit 1
+  }
 
   $exe = Get-ChildItem -Path @(
     "$env:LOCALAPPDATA\Programs",
