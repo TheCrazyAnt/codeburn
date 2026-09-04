@@ -404,7 +404,7 @@
 "Last 7d" = "最近 7 天";
 "Last known usage · refreshing" = "上次已知用量 · 刷新中";
 "Last known usage · retrying" = "上次已知用量 · 重试中";
-"Last report: %@ %@ · lifetime %@ · %@ tokens" = "上次报告：%@ %@ · 累计 %@ · %@ tokens";
+"Last report: %@ %@ · lifetime %@ · %@ tokens" = "上次报告：%@ %@ · 累计 %@ · %@ token";
 "Last upload %@." = "上次上传：%@。";
 "Last upload failed" = "上次上传失败";
 "Leaderboard" = "排行榜";

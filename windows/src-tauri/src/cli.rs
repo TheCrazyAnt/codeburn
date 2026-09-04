@@ -1,5 +1,5 @@
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -32,6 +32,12 @@ const WINDOWS_CLI_NAMES: [&str; 2] = ["codeburn.cmd", "codeburn.exe"];
 const CLAUDE_NAMES: [&str; 2] = ["claude.cmd", "claude.exe"];
 #[cfg(not(windows))]
 const CLAUDE_NAMES: [&str; 1] = ["claude"];
+
+/// What a Node interpreter is called next to the CLI shim, per platform.
+#[cfg(windows)]
+const NODE_NAMES: [&str; 1] = ["node.exe"];
+#[cfg(not(windows))]
+const NODE_NAMES: [&str; 1] = ["node"];
 
 /// Alphanumerics plus `._/-` and space, with `\`, `:`, `(`, `)` also allowed on Windows
 /// so a user-supplied `CODEBURN_BIN` path like `C:\Users\...\codeburn.cmd` is accepted.
@@ -177,6 +183,9 @@ impl CodeburnCli {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
+        if let Some(path) = interpreter_first_path(&self.program) {
+            cmd.env("PATH", path);
+        }
         #[cfg(windows)]
         {
             const CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -292,6 +301,24 @@ pub fn parse_version(text: &str) -> Option<(u32, u32, u32)> {
             .ok()
     });
     Some((parts.next()??, parts.next()??, parts.next().flatten().unwrap_or(0)))
+}
+
+/// The `codeburn` shim resolves `node` through PATH, so whichever interpreter comes
+/// first wins -- and a version manager's default is easily older than the 22.13 the
+/// CLI requires, which surfaces as a version error that names Node but not the reason.
+/// When an interpreter sits in the same directory as the shim we are about to run
+/// (how Volta and fnm lay things out), that one is known to satisfy the CLI, so its
+/// directory goes first. Returns `None` when there is nothing to reorder, so the
+/// inherited PATH is passed through untouched rather than rebuilt on a guess.
+fn interpreter_first_path(program: &str) -> Option<std::ffi::OsString> {
+    let dir = Path::new(program).parent().filter(|d| d.is_absolute())?;
+    if !NODE_NAMES.iter().any(|n| dir.join(n).is_file()) {
+        return None;
+    }
+    let inherited = env::var_os("PATH").unwrap_or_default();
+    let mut dirs = vec![dir.to_path_buf()];
+    dirs.extend(env::split_paths(&inherited).filter(|d| d != dir));
+    env::join_paths(dirs).ok()
 }
 
 /// Locates the CLI without relying on the inherited PATH being fresh. A tray app is often
@@ -597,6 +624,37 @@ mod which {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Regression guard for the Node-version trap: the CLI shim resolves `node`
+    /// through PATH, so a version manager's default could shadow the interpreter
+    /// that installed it and every spawn would die on the version gate.
+    #[test]
+    fn interpreter_beside_the_shim_leads_the_child_path() {
+        let root = std::env::temp_dir().join(format!("codeburn-path-probe-{}", std::process::id()));
+        let with_node = root.join("with-node");
+        let without_node = root.join("without-node");
+        std::fs::create_dir_all(&with_node).unwrap();
+        std::fs::create_dir_all(&without_node).unwrap();
+        std::fs::write(with_node.join(NODE_NAMES[0]), b"probe").unwrap();
+
+        let shim = with_node.join(candidate_names()[0]);
+        let rebuilt = interpreter_first_path(&shim.to_string_lossy()).expect("sibling node should reorder");
+        let dirs: Vec<PathBuf> = env::split_paths(&rebuilt).collect();
+        assert_eq!(dirs.first(), Some(&with_node));
+        // Every inherited entry survives -- the directory is promoted, not duplicated,
+        // and nothing else is dropped.
+        let inherited: Vec<PathBuf> = env::split_paths(&env::var_os("PATH").unwrap_or_default())
+            .filter(|d| *d != with_node)
+            .collect();
+        assert_eq!(dirs[1..], inherited[..]);
+
+        // No interpreter beside it, or a bare name: the inherited PATH is left alone.
+        let lonely = without_node.join(candidate_names()[0]);
+        assert!(interpreter_first_path(&lonely.to_string_lossy()).is_none());
+        assert!(interpreter_first_path("codeburn").is_none());
+
+        std::fs::remove_dir_all(&root).ok();
+    }
 
     /// The `;;` / trailing-`;` case: an empty PATH entry must not turn into a
     /// current-directory lookup, which is how a planted binary would win at login.
