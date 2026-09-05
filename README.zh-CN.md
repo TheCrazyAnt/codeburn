@@ -145,10 +145,14 @@ cd windows && npm ci && npm run tauri build   # Windows 托盘应用（需要 Wi
 
 - 命令行、网页仪表盘、两个桌面应用都已汉化。命令行以本仓库 Releases 里的 `.tgz` 分发（`npm install -g codeburn` 装到的是上游英文版）。
 - 本分支会跟随上游版本更新；版本号形如 `0.9.23-zh7`，前半段对应上游版本，`zhN` 是本分支的第 N 次发布，三个端各自计数。
-- 已知限制：Windows 的「应用」列表里所有 zh 版本都显示 `0.9.23`，分不出 zhN；以安装脚本输出或应用内设置面板显示的版本为准。
+- Windows「应用」列表里的版本号从 zh8 起显示为 `0.9.23.N`（N 就是 zhN 的序号）；zh7 及更早都显示 `0.9.23`。应用内设置面板显示 `0.9.23-zhN`。
 - 上游作者：[AgentSeal](https://github.com/getagentseal)。协议 MIT，见 [LICENSE](LICENSE)。
 
 ## 更新记录
+
+**2026-09-05** · windows `zh8`
+- MSI 版本号带上发布序号（`0.9.23.8`），Windows「应用」列表能分清装的是哪一版；安装包文件名也带 `zh8`。
+- 安装脚本：已装同一个包时跳过，重复运行安全；MSI 失败时从日志翻出真实原因；首装主动提权。
 
 **2026-09-04** · mac `zh13` · windows `zh7` · cli `zh5`
 - Windows 托盘应用补齐到和 macOS 一致（周期、日历、本地/合并、货币、八个标签页、托盘菜单跟随语言）。

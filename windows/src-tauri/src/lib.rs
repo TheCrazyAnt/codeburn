@@ -251,6 +251,26 @@ fn shell_open_windows(url: &str) -> Result<(), String> {
     Err(format!("{why} (ShellExecute code {code})"))
 }
 
+/// `0.9.23` + build `8` -> `0.9.23-zh8`; no build metadata -> `0.9.23` unchanged.
+fn display_version(major: u64, minor: u64, patch: u64, build: &str) -> String {
+    if build.is_empty() {
+        format!("{major}.{minor}.{patch}")
+    } else {
+        format!("{major}.{minor}.{patch}-zh{build}")
+    }
+}
+
+#[cfg(test)]
+mod version_tests {
+    use super::display_version;
+
+    #[test]
+    fn build_metadata_becomes_the_zh_tag() {
+        assert_eq!(display_version(0, 9, 23, "8"), "0.9.23-zh8");
+        assert_eq!(display_version(0, 9, 23, ""), "0.9.23");
+    }
+}
+
 #[cfg(not(target_os = "linux"))]
 const BLANK_ICON_SIZE: u32 = 16;
 
@@ -631,8 +651,13 @@ mod commands {
     }
 
     #[tauri::command]
+    /// The fork's release number rides in the build metadata (`0.9.23+8` is
+    /// the eighth Chinese build of 0.9.23; the MSI shows it as 0.9.23.8), and
+    /// the tag it came from reads `zh8`. The settings panel shows the tag form
+    /// so it, the installer's output and the release page all say one thing.
     pub fn app_version(app: AppHandle) -> String {
-        app.package_info().version.to_string()
+        let v = &app.package_info().version;
+        crate::display_version(v.major, v.minor, v.patch, &v.build.to_string())
     }
 
     #[tauri::command]

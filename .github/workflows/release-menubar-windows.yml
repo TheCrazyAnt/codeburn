@@ -54,9 +54,32 @@ jobs:
         working-directory: windows
         run: npm ci
 
+      - name: Resolve bundle version
+        id: bundle
+        shell: bash
+        run: |
+          # Every zh release shipped ProductVersion 0.9.23, so Windows' Apps list could
+          # not tell zh5 from zh7 and upgrades had nothing but the ProductCode to go on.
+          # A tag windows-v0.9.23-zh8 becomes the semver 0.9.23+8: tauri-bundler turns
+          # numeric build metadata into the MSI's fourth field (0.9.23.8), which Windows
+          # shows in Apps but ignores when comparing versions, so the upgrade path is
+          # unchanged. The asset keeps a URL-safe name with the zh number in it.
+          label='${{ steps.version.outputs.value }}'
+          base=$(node -p "require('./windows/src-tauri/tauri.conf.json').version")
+          if [[ "$label" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)-zh([0-9]+)$ ]]; then
+            base="${BASH_REMATCH[1]}"; n="${BASH_REMATCH[2]}"
+            echo "semver=${base}+${n}" >> "$GITHUB_OUTPUT"
+            echo "asset=CodeBurn.Menubar_${base}-zh${n}_x64_en-US.msi" >> "$GITHUB_OUTPUT"
+          else
+            echo "semver=${base}" >> "$GITHUB_OUTPUT"
+            echo "asset=CodeBurn.Menubar_${base}_x64_en-US.msi" >> "$GITHUB_OUTPUT"
+          fi
+          cat "$GITHUB_OUTPUT"
+
       - name: Build MSI bundle
         working-directory: windows
-        run: npm run tauri build
+        shell: bash
+        run: npm run tauri build -- --config '{"version":"${{ steps.bundle.outputs.semver }}"}'
 
       - name: Collect artifacts
         shell: bash
@@ -64,7 +87,7 @@ jobs:
           set -euo pipefail
           mkdir -p release-artifacts
           find windows/src-tauri/target/release/bundle -type f -name '*.msi' \
-            -exec cp -v {} release-artifacts/ \;
+            -exec cp -v {} "release-artifacts/${{ steps.bundle.outputs.asset }}" \;
           (cd release-artifacts && for f in *.msi; do sha256sum "$f" > "$f.sha256"; done)
           ls -la release-artifacts
 
