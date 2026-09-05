@@ -57,18 +57,17 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: Menubar ${{ steps.version.outputs.value }}
           body: |
-            Install with:
+            ## 安装
 
-            ```
-            npm install -g codeburn
-            codeburn menubar
+            推荐用一键脚本，它会装好**中文版命令行 + 这个菜单栏应用**并设为中文，重复运行安全：
+
+            ```bash
+            curl -fsSL https://raw.githubusercontent.com/TheCrazyAnt/codeburn/zh-hans/mac/Scripts/install-zh.sh | bash
             ```
 
-            That command drops the app into `~/Applications`, records the persistent
-            `codeburn` CLI path used by the menubar, verifies the downloaded checksum,
-            clears quarantine after bundle verification, and launches it. If you download
-            the zip from this page directly and macOS shows "cannot verify developer",
-            right-click the app in Finder and pick Open to whitelist it once.
+            已装过的直接在应用内「检查更新」。不要用 `npm install -g codeburn` 或 `codeburn menubar`——那装到的是上游英文版，会把中文版覆盖掉。
+
+            手动装：下载下面的 zip，解压后把 `CodeBurnMenubar.app` 拖进「应用程序」；macOS 提示「无法验证开发者」时，在 Finder 里右键 → 打开一次即可。需要 macOS 14 (Sonoma) 以上和 Node.js 22.13+。
           files: |
             mac/.build/dist/CodeBurnMenubar-${{ steps.version.outputs.value }}.zip
             mac/.build/dist/CodeBurnMenubar-${{ steps.version.outputs.value }}.zip.sha256
