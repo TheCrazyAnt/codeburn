@@ -106,17 +106,21 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: Windows Menubar ${{ steps.version.outputs.value }}
           body: |
-            Download the `.msi` below and run it. The tray app reads everything through the
-            CodeBurn CLI, so install that first:
+            ## 安装
 
+            推荐用一键脚本，它会装好**中文版命令行 + 这个托盘应用**并设为中文，重复运行安全：
+
+            ```powershell
+            irm https://raw.githubusercontent.com/TheCrazyAnt/codeburn/zh-hans/windows/Scripts/install-zh.ps1 | iex
             ```
-            npm install -g codeburn
-            ```
 
-            Requires codeburn 0.9.9 or newer and the WebView2 Runtime (preinstalled on
-            Windows 11 and recent Windows 10 updates; installed on demand otherwise).
+            只想手动装 `.msi`：托盘应用只是壳，数据全靠命令行，请先按
+            [README.zh-CN.md](https://github.com/TheCrazyAnt/codeburn/blob/zh-hans/README.zh-CN.md#windows)
+            装中文版命令行（`npm install -g codeburn` 装到的是上游英文版）。
 
-            The bundle is unsigned, so Windows SmartScreen warns on first run: click
-            "More info", then "Run anyway". Signing is planned.
+            需要 Node.js 22.13+ 和 WebView2 运行时（Windows 11 自带）。首次安装会弹 UAC；安装包未签名，
+            SmartScreen 首次会拦截，点「更多信息」→「仍要运行」。
+
+            版本号 `${{ steps.bundle.outputs.semver }}`；Windows「应用」列表显示为四段形式。
           files: release-artifacts/*
           fail_on_unmatched_files: true
